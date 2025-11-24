@@ -1,0 +1,42 @@
+{
+    "serial_command_port": "COM6",
+    "modbus_port": "COM9",
+    "serial_baud": "115200",
+    "serial_data_bits": "8",
+    "serial_parity": "Nenhuma",
+    "serial_handshake": "Nenhum",
+    "serial_mode": "Free",
+    "serial_dtr": false,
+    "serial_rts": false,
+    "modbus_baud": "9600",
+    "modbus_data_bits": "8",
+    "modbus_parity": "Nenhuma",
+    "modbus_handshake": "Nenhum",
+    "modbus_mode": "Free",
+    "modbus_dtr": false,
+    "modbus_rts": false,
+    "auto_send_lines": [
+        {
+            "command": "HELP",
+            "auto_send_checked": false,
+            "interval_seconds": 1.5
+        },
+        {
+            "command": "PRINT_SENSORS",
+            "auto_send_checked": false,
+            "interval_seconds": 3.0
+        },
+        {
+            "command": "SET_RESET_POWER",
+            "auto_send_checked": false,
+            "interval_seconds": 2.3
+        },
+        {
+            "command": "SET_ANALOG_MONITOR=ON;",
+            "auto_send_checked": false,
+            "interval_seconds": 1.0
+        }
+    ],
+    "last_pr_number": "14237",
+    "last_serial_number": "16814/16"
+}

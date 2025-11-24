@@ -1,0 +1,381 @@
+{
+    "version": "1.4",
+    "modbus_required": false,
+    "fast_mode_code": "1003",
+    "steps": [
+        {
+            "nome": "Utilize o KIT de teste do PR21003",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Para realizar o teste será necessário 1 Potenciômetro de 10K, 1 fonte 24VCC ou transformador 24VAC, Borne de 3 vias com chave alavanca de duas posições e um display de testes CONTADORA DISPLAY BRALYX!",
+            "caminho_imagem": "Z:/EmbTech_Serial_V68/images/MODO DE CONEXÃO BRALYX.png",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Gravação",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Certifique-se que a placa esta gravada com a ultima versão do software disponivel na pasta do projeto!",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Conecte a placa CONTADORA DISPLAY",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte a placa CONTADORA DISPLAY no conector H1!",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Conexão Cabo ISP",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte o cabo de gravação em CN2!",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Energize a placa no borne CN1.",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Energize a placa no borne CN1, nos pinos 24 AC/DC!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste UART",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_PROG;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "TESTE_OK->PROG",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Segmentos do display",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Ao clicar em \"YES\" será iniciado o teste do Display. Certifique que todos os segmentos acionarão corretamente!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste do DISPLAY",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_DISPLAY;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "TESTE_DISPLAY->INICIADO...",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Tempo de espera",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "tempo_espera",
+            "duracao_espera_segundos": 6,
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste do DISPLAY",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": " ",
+            "esperar_resposta": true,
+            "timeout_ms": 3500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "TESTE_DISPLAY->FINALIZADO",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Segmentos do display",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Todos Segmentos do display acenderam de forma individual?",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste da Memória EEPROM",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_EEP;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "param_validacao": {
+                "simplified_text": "pagina: [VALOR]",
+                "regex": "pagina:\\ \\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 7.0,
+                "max": 9.0
+            },
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste da Memória EEPROM",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_EEP;",
+            "esperar_resposta": true,
+            "timeout_ms": 2500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "TESTE_EEP->INICIADO...\n\nIniciando o teste...\nAguarde...\nMemoria detectada: 2 kb\nTamanho de pagina: 8 B\n40%...50%...90%...100%...\n\nResultado do teste da memoria EEPROM:\n*Teste realizado com SUCESSO!!",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste SW1 Solta",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": " TESTE_SW1;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "VALOR DE SW1:1",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste SW1 Pressionada",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Após clicar em \"Yes\" pressione e mantenha pressione S1 no Display!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste SW1 Pressionada",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_SW1;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "VALOR DE SW1:0",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Conexão Chave alavanca",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Insira o conector de 3 vias com a chave alavanca nos pinos 1, 2 e 3 de CN1. A chave alavanca deve ficar nos pinos 2 e 3 de CN1 e na posição \"ABERTA\"!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste IND Solta",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_IND;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "VALOR DE IND:0",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste IND Pressionada",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Feche a chave alavanca para acionar a saida OUT1!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste IND Pressionada",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_IND;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "param_validacao": {
+                "simplified_text": "IND:[VALOR]",
+                "regex": "IND:\\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 1.0,
+                "max": 1.0
+            },
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste OUT1 ON",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_OUT1_ON;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "OUT1_ON",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste OUT1 ON",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "A Saída OUT1 está acionada?",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste OUT1 OFF",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_OUT1_OFF;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "OUT1_OFF",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste OUT1 OFF",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "A Saída OUT1 está aberta?",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste OUT1 OFF",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Mude a posição da chave alavanca para \"Aberto\"!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Conexão Potenciômetro com chave ligada",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Insira o conector de 3 vias com o Potenciômetro nos pinos 4, 5 e 6 de CN1!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Potenciômetro com chave desligada",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Com o Potenciômetro nos pinos 4, 5 e 6 de CN1!\nColoque a chave na posição desligada movimente o potenciometro, não pode exibir o tempo no display!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Ligue a chave",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Coloque a chave na posição ligada novamente!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste ADC 0V",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Feche o Contato POT de CN1 para GND, decremetando o valor indicado no display!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste ADC 0V",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_ADC;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "VALORES DO ADC:0",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste ADC 3.3V",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Feche o Contato POT de CN1 para +3.3V, aumentando o valor exibido pelo display!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste ADC 3.3V",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_ADC;",
+            "esperar_resposta": true,
+            "timeout_ms": 3500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "VALORES DO ADC:100",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Finalização do teste",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Você concluiu o teste. Caso já tenha memorizado os passos da instrução inicial, digite o código 1003 no campo Enviar Comando Direto e pressione Enter. Isso desativará a exibição dos passos de instrução inicial.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        }
+    ],
+    "port_configurations": {
+        "serial_command": {
+            "baud": "57600",
+            "data_bits": "8",
+            "parity": "Nenhuma",
+            "handshake": "Nenhum",
+            "mode": "Free"
+        },
+        "modbus": {
+            "baud": "9600",
+            "data_bits": "8",
+            "parity": "Nenhuma",
+            "handshake": "Nenhum",
+            "mode": "Free"
+        }
+    }
+}

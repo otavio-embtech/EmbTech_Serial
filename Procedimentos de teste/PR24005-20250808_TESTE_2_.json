@@ -1,0 +1,102 @@
+{
+    "version": "1.4",
+    "modbus_required": false,
+    "fast_mode_code": "4005",
+    "steps": [
+        {
+            "nome": "Kit de teste PR24005",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Para realizar o teste do PR24005 serão necessários os seguintes componentes:\n1 Fonte chaveada de 5 VCC;\n1 Fonte chaveada de 12 VCC;\n1 Pinça;\n1 Placa CPU DIGI.",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Conexão do sensor de temperatura",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte o sensor de temperatura ao conector CN1 da seguinte forma:\nCabo vermelho conectado ao pino + de CN1;\nCabo amarelo conectado ao pino SDA de CN1;\nCabo marrom conectado ao pino - de CN1;\nCabo laranja conectado ao pino SLC de CN1;",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Alimente a placa CPU Potência de teste com 12VDC no conector CN8",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Alimente a placa CPU Potênciade teste com 12VDC no conector CN8.\n(Observe a posição correta dos sinais no silk da placa).",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Curto-circuito no conector CN8",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "No conector CN8, insira um curto-circuito nos pinos AN1+ com AN1- e AN2+ com AN2-",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Ligue a placa CPU DIGI",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Ligue a placa CPU DIGI e ligue através do botão POWER do teclado.",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verificação PAN ID",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique o PAN ID da seguinte forma:\n- Na placa CPU DIGI aperte simultaneamente as teclas CANCELA + UP;\n- Selecione o menu REDE WIRELESS;\n- Entre com a senha 080 (Senha apenas para leitura);\n- Modifique o PAN ID exibido para o mesmo número de série e lote da placa Modulo Wireless através da tecla enter, up e donw;\n- Volte para a tela principal através da tecla CANCELA.",
+            "caminho_imagem": "Z:/EmbTech_Serial_V68/images/PAN ID PINHALENSE.jpeg"
+        },
+        {
+            "nome": "Curto-circuito no conector H1",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Utilizando uma pinça, feche um curto-circuito por aproximadamente 3 segundos entre os pinos + e - de H1 da placa Modulo Wireless.",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Alimente a placa Módulo Wireless com 5VDC no conector H1",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Alimente a placa Módulo Wireless com 5VDC no conector H1.(Observe a posição correta dos sinais no silk da placa).",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste Comunicação MODULO WIRELESS e CPU DIGI",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique a comunicação entre as placas da seguinte forma:\n- Verifique se a placa CPU DIGI exibe as mensagens \n  “ERRO LEITURA BAT SENSOR WIRELESS” e \n  “ERRO SENSOR TEMPERATURA GRAO”\n- Energize o MODULO WIRELESS;\n- Ao estabelecer a comunicação com o MODULO WIRELESS, a placa CPU DIGI deve parar de\n  exibir as mensagens de erro e passar a exibir os valores de T1 e T2.\n- Verifique se as temperaturas T1 e T2 são exibidas, indicando o correto funcionamento\n  da comunicação Wireless.\n*Obs. A conexão entre as placas pode levar até 1 minuto e 20 segundos para ser estabelecida, pois o módulo envia o sinal de sincronização a cada 1 minuto.",
+            "caminho_imagem": "Z:/EmbTech_Serial_V68/images/TEMPERATURA PINHALENSE.jpeg",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        }
+    ],
+    "port_configurations": {
+        "serial_command": {
+            "baud": "115200",
+            "data_bits": "8",
+            "parity": "Nenhuma",
+            "handshake": "Nenhum",
+            "mode": "Free"
+        },
+        "modbus": {
+            "baud": "9600",
+            "data_bits": "8",
+            "parity": "Nenhuma",
+            "handshake": "Nenhum",
+            "mode": "Free"
+        }
+    }
+}

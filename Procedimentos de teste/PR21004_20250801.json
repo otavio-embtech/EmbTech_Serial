@@ -1,0 +1,177 @@
+{
+    "version": "1.4",
+    "modbus_required": false,
+    "fast_mode_code": "1004",
+    "steps": [
+        {
+            "nome": "Utilize o KIT de teste do PR21004",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Para realizar o teste será necessário 1 fonte 24VCC ou transformador 24VAC e um display de testes CONTADORA DISPLAY BRALYX!",
+            "caminho_imagem": "Z:/EmbTech_Serial_V68/images/MODO DE CONEXÃO BRALYX.png",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Gravação",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Certifique-se que a placa de teste está gravada com a ultima versão do software disponivel na pasta do projeto PR21003!",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Conecte a placa CONTADORA DISPLAY",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte a placa CONTADORA DISPLAY no conector H1!",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Conexão Cabo ISP",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte o cabo de gravação em CN2!",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Energize a placa no borne CN1.",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Energize a placa no borne CN1, nos pinos 24 AC/DC!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste UART",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_PROG;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "TESTE_OK->PROG",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Segmentos do display",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Ao clicar em \"YES\" será iniciado o teste do Display. Certifique que todos os segmentos acionarão corretamente!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste do DISPLAY",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_DISPLAY;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "TESTE_DISPLAY->INICIADO...",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Tempo de espera",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "tempo_espera",
+            "duracao_espera_segundos": 6,
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste do DISPLAY",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": " ",
+            "esperar_resposta": true,
+            "timeout_ms": 3500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "TESTE_DISPLAY->FINALIZADO",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Segmentos do display",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Todos Segmentos do display acenderam de forma individual?",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste SW1 Solta",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": " TESTE_SW1;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "VALOR DE SW1:1",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste SW1 Pressionada",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Após clicar em \"Yes\" pressione e mantenha pressione S1 no Display!",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste SW1 Pressionada",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_SW1;",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "param_validacao": "VALOR DE SW1:0",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Finalização do teste",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Você concluiu o teste. Caso já tenha memorizado os passos da instrução inicial, digite o código 1004 no campo Enviar Comando Direto e pressione Enter. Isso desativará a exibição dos passos de instrução inicial.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        }
+    ],
+    "port_configurations": {
+        "serial_command": {
+            "baud": "57600",
+            "data_bits": "8",
+            "parity": "Nenhuma",
+            "handshake": "Nenhum",
+            "mode": "Free"
+        },
+        "modbus": {
+            "baud": "9600",
+            "data_bits": "8",
+            "parity": "Nenhuma",
+            "handshake": "Nenhum",
+            "mode": "Free"
+        }
+    }
+}

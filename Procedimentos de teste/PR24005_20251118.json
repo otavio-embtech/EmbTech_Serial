@@ -1,0 +1,266 @@
+{
+    "version": "1.4",
+    "modbus_required": true,
+    "fast_mode_code": "4005",
+    "steps": [
+        {
+            "nome": "Kit de teste PR24005",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Para realizar o teste do PR24005 serão necessários os seguintes componentes:\n1 Fonte chaveada de 5 VCC;\n1 Fonte chaveada de 24 VCC;\n1 Pinça;\n1 Placa CPU DIGI;\n2 Gravadores com cabo ARM.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Verificação do conector H1",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique com o multímetro na escala de continuidade se não há\ncondutividade (curto-circuito) entre os pinos + e - do conector H1.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Conexão do sensor de temperatura",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte o sensor de temperatura ao conector CN1 da seguinte forma:\nCabo vermelho conectado ao pino + de CN1;\nCabo amarelo conectado ao pino SDA de CN1;\nCabo marrom conectado ao pino - de CN1;\nCabo laranja conectado ao pino SLC de CN1;",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Conecte o conversor USB->UART (PROGRAM ISP MODULO)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte o conversor USB->UART (PROGRAM ISP MODULO) no conector CN2 da placa Módulo Wireless.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Conecte o conversor USB->UART (PROGRAM ISP CPU)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte o conversor USB->UART (PROGRAM ISP CPU) no conector CN1 da placa de teste CPU DIGI.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Alimente a placa CPU Potência de teste com 24VDC no conector CN8",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Alimente a placa CPU Potênciade teste com 24VDC no conector CN8.\n(Observe a posição correta dos sinais no silk da placa).",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Conexão da placa CPU Potência à placa CPU DIGI",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte a placa CPU Potência (Conector H1) à placa CPU Digi (Conector\nH3).",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Verificação de software",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "A placa está gravada com a ultima versão de software disponivel na pasta do projeto?",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Alimente a placa Módulo Wireless com 5VDC no conector H1",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Alimente a placa Módulo Wireless com 5VDC no conector H1.(Observe a posição correta dos sinais no silk da placa).",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Verificação LED DS1",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique se o LED DS1, do módulo Wireless, está aceso.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Ativação do Modo de Teste",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "MODO_TESTE;",
+            "esperar_resposta": true,
+            "timeout_ms": 2000,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "ATIVADO!!"
+        },
+        {
+            "nome": "Leitura do sensor de temperatura",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "modbus_comando",
+            "modbus_params": [
+                {
+                    "slave_id": 10,
+                    "function_code_display": "Read Holding Registers (0x03)",
+                    "function_code": "03",
+                    "address": 10,
+                    "quantity": 1,
+                    "value_type": "Register (16-bit)",
+                    "write_value": "",
+                    "expected_value": "",
+                    "min_limit": 1500.0,
+                    "max_limit": 3500.0
+                }
+            ]
+        },
+        {
+            "nome": "Retire a alimentação de 5VDC do conector H1",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Retire a alimentação de 5VDC do conector H1",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Feche um curto em H1",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Utilizando uma pinça, feche um curto-circuito por aproximadamente 3 segundos entre os pinos + e - de H1.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Alimente a placa Módulo Wireless com 5VDC no conector H1",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Alimente a placa Módulo Wireless com 5VDC no conector H1.(Observe a posição correta dos sinais no silk da placa).",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Ativação do Modo de Teste",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "comando_validacao",
+            "port_type": "modbus",
+            "comando_enviar": "MODO_TESTE;",
+            "esperar_resposta": true,
+            "timeout_ms": 2000,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "ATIVADO!!"
+        },
+        {
+            "nome": "Verificação do número de lote e série",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_WPAN_ID=%LOTE%/%SERIE%;).",
+            "esperar_resposta": true,
+            "timeout_ms": 1000,
+            "tipo_validacao": "serial_settings_match",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": {}
+        },
+        {
+            "nome": "Ativacao do Modo de Teste placa CPU DIGI",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "MODO_TESTE",
+            "esperar_resposta": true,
+            "timeout_ms": 1000,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "MODO TESTE ATIVADO!!"
+        },
+        {
+            "nome": "Configuração WPAN_ID CPU DIGI",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "WPAN_ID=%LOTE%/%SERIE%;",
+            "esperar_resposta": true,
+            "timeout_ms": 1000,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "SUCESSO!!"
+        },
+        {
+            "nome": "Ativação Teste Wireless Módulo",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_WIRELESS;",
+            "esperar_resposta": true,
+            "timeout_ms": 15000,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "SUCESSO!!!"
+        },
+        {
+            "nome": "Desenergizar as placa CPU DIGI e MODULO WIRELESS",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Desenergizar as placa CPU DIGI e MODULO WIRELESS",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Curto-circuito no conector CN8",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "No conector CN8, insira um curto-circuito nos pinos AN1+ com AN1- e AN2+ com AN2-",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Retire o cabo de gravação de CN1 e CN2",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Retire o cabo de gravação de CN1 da placa CPU DIGI e\nCN2 da placa MODULO WIRELESS.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Feche um curto em H1",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Utilizando uma pinça, feche um curto-circuito por aproximadamente 3 segundos entre os pinos + e - de H1 da placa Modulo Wireless.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Ligue a placa CPU DIGI",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Energize a placa CPU DIGI e ligue através do botão POWER do teclado.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Verificação PAN ID",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique o PAN ID da seguinte forma:\n- Na placa CPU DIGI aperte simultaneamente as teclas CANCELA + UP;\n- Selecione o menu REDE WIRELESS;\n- Entre com a senha 000 (Senha apenas para leitura);\n- Verifique se o PAN ID exibido é o mesmo número de série e lote da placa Modulo Wireless;\n- Volte para a tela principal através da tecla CANCELA.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Teste Comunicação MODULO WIRELESS e CPU DIGI",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique a comunicação entre as placas da seguinte forma:\n- Verifique se a placa CPU DIGI exibe as mensagens \n  “ERRO LEITURA BAT SENSOR WIRELESS” e \n  “ERRO SENSOR TEMPERATURA GRAO”\n- Energize o MODULO WIRELESS;\n- Ao estabelecer a comunicação com o MODULO WIRELESS, a placa CPU DIGI deve parar de\n  exibir as mensagens de erro e passar a exibir os valores de T1 e T2.\n- Verifique se as temperaturas T1 e T2 são exibidas, indicando o correto funcionamento\n  da comunicação Wireless.",
+            "caminho_imagem": ""
+        }
+    ],
+    "port_configurations": {
+        "serial_command": {
+            "baud": "57600",
+            "data_bits": "8",
+            "parity": "Nenhuma",
+            "handshake": "Nenhum",
+            "mode": "Free"
+        },
+        "modbus": {
+            "baud": "19200",
+            "data_bits": "8",
+            "parity": "Nenhuma",
+            "handshake": "Nenhum",
+            "mode": "Free"
+        }
+    }
+}

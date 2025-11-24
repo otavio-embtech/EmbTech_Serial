@@ -1,0 +1,872 @@
+{
+    "version": "1.4",
+    "modbus_required": true,
+    "fast_mode_code": "4237",
+    "steps": [
+        {
+            "nome": "Kit de Teste",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Para realizar o teste da palaca POWER será necessário:\nConversor RS-485 (Padrão A -> A e B -> B);\nGravador USB;\nFonte chaveada de +12VCC;\nMultimetro digital;\nPen Drive com arquivo \"power.bin\";\nBotão On/Off sem retenção;\nKit de Teste de Entrada de corrente AC;\nMódulo HandHeld.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Iniciando teste 01",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "No primeiro teste a placa dever passar pelo teste do ICT desenergizada antes de prosseguir com o teste01.\nPara o teste 02 não é necessário passar pelo ICT.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verificação CN1 (POWER)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Com o multímetro na escala de continuidade, verifique se não há curto-circuito entre os pinos 12V-IN e GND do conector CN1 (POWER).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verificação CN8 (VAC-IN)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Com o multímetro na escala de continuidade, verifique se não há curto-circuito entre os pinos VF e VN do conector CN8 (VAC-IN).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verificação CN6 (RS-485)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Com o multímetro na escala de continuidade, verifique se não há curto-circuito entre os pinos +VR e GR do conector CN6 (RS-485).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verificação de software",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "A placa está com o firmware Bootloader_usb_stm32f446 gravado?\nO firmware deve ser gravado antes de iniciar o teste, utilizando o cabo LPC.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Terminação RS-485",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Com o multímetro na escala de resistência, verifique o valor entre os pinos A e B do conector CN6 (RS-485). O valor deve ser de 120 ohms com tolerância de +- 2 ohms.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Terminação CAN",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Com o multímetro na escala de resistência, verifique o valor entre os pinos H e L do conector CN5 (CAN/IHM). O valor deve ser de 120 ohms com tolerância de +- 2 ohms.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Insira o botão on/off no conector CN17 (BUTTON)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Insira o botão on/off no conector CN17 (BUTTON). Este botão deve estar conectado entre os sinais GND e BIN de CN17.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Gravação do Firmware da Power G2 no pendrive",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Insira o pendrive com o arquivo \"power.bin\" do firmware atual da Power G2 gravada na raiz de um pendrive.\n\nRecomenda-se que o pendrive possua apenas o arquivo \"power.bin\".",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Alerta de gravação via porta USB",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Certifique que o gravador NÃO está conectado à placa antes do processo de gravação do firmware via porta USB.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Processo de gravação do firmware da Power G2 via porta USB",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Os passos a seguir devem ser realizados para gravar o firmware proncipal da placa Power G2. Caso a gravação da versão atual já tenha sido efetuada, deconsidere este passo e prossiga para o próximo.\n\nProcedimento para gravação:\n- Pressione o botão On/Off conectado a CN17 e alimente a placa com 12VDC no conector CN1 (Observe no silk da placa a posição correta dos sinais);\n- Assim que alimentar, solte o botão On/Off para que a placa entre em modo de gravação via USB. Obs: O botão deve ser solto em um intervalo menor que 5 segundos; \n- Durante o processo de gravação, o LED V-USB (DS6) deve permanecer aceso; \n- O processo de gravação dura aproximadamente 10 segundos;\n- Observe o LED BT-OUT (DS24) durante a gravação. Após o término do processo, ele deve piscar uma única vez para indicar gravação realizada com sucesso;\n- Caso ele pisque uma única vez, prossiga com o teste. Caso contrário, não avance para os próximos passos.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Conecte o gravador USB com o cabo expansão no conector CN3 (EXP.2).",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Desligue a placa e conecte o gravador USB no conector CN3 (EXP.2). \nUtilize um cabo de EXPASÃO no gravador para interligar com a placa apenas os sinais GND, RX e TX.\n\nATENÇÃO: A interligação dos demais sinais pode provocar o reset da placa ou a entrada em Bootloader de sistema, impossibilitando o teste.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Alimente a placa com 12VDC no conector CN1",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Alimente a placa com 12VDC no conector CN1.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verifique se os LEDs 3.3V e 5V estão acesos",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique se os LEDs 3.3V e 5V estão acesos.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verifique se o LED V_USB está apagado",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique se o LED V_USB está apagado.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verifique se o LED1 está piscando e o LED2 está aceso",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique se o LED1 está piscando e o LED2 está aceso.\n\nCaso o LED1 não esteja piscando os dois problemas mais prováveis são:\n1->Gravador está mantendo a placa em Reset ou em modo de gravação.\n2->Firmware da Power G2 ou Bootloader não foram gravados corretamente.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste 1 dos leds BT-IN, BT-OUT e 12V-IHM",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique se o led BT-IN (DS25) está aceso e os leds BT-OUT (DS24) e 12V-IHM(DS3) estão apagados.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste 2 dos leds BT-OUT e 12V-IHM e do botão on/off no conector CN17 (BUTTON)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Pressione e solte o botão on/off no conector CN17 (BUTTON). Verifique se os leds BT-OUT (DS24) e 12V-IHM(DS3) estão acesos.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste do led BT-IN (DS25) = OFF",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique se quando o botão é pressionado, o led BT-IN (DS25) é apagado.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Tempo de espera",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "tempo_espera",
+            "duracao_espera_segundos": 2
+        },
+        {
+            "nome": "Reset na placa Power para evitar interferências de testes anteriores no teste atual",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "SET_RESET_POWER",
+            "esperar_resposta": false,
+            "timeout_ms": 0,
+            "tipo_validacao": "nenhuma",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Aguarda reset da Power",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "tempo_espera",
+            "duracao_espera_segundos": 2,
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Acesso ao modo de Teste",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "SET_TEST_MODE_ON",
+            "esperar_resposta": true,
+            "timeout_ms": 2500,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "TEST MODE = ON. CAN 500kbps Init...",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste da porta de programação EXP.2",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "TESTE_UART_PROG",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "TESTE_OK->UART_PROG",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verificação do LED2 após a entrada em modo de teste",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verificação do LED2 após a entrada em modo de teste. Neste modo o LED2 deve estar piscando.\n\nDeste passo em diante, o teste deve ser finalizado em, no máximo, 10 minutos. No final deste tempo a placa sairá automaticamente do modo de teste e deverá ser reiniciada para um novo teste.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Insira o conector do conversor USB->RS-485 em CN6 (RS-485)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Insira o conector do conversor USB->RS-485 em CN6 (RS-485). (Observe no silk da placa a posição correta dos sinais).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Remova os plugs dos conectores CN9 (THERM.G1) e CN10 (THERM.G2)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Remova os plugs dos conectores CN9 (THERM.G1) e CN10 (THERM.G2).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste de temperatura da placa",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_SENSORS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "param_validacao": {
+                "simplified_text": "Placa: [VALOR]",
+                "regex": "Placa:\\ \\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 10.0,
+                "max": 35.0
+            },
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste 1 do Termopar T1",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_TEMPERATURES",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_multiplos",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": {
+                "simplified_text": "Temp Ch1:-[VALOR] / Ch2:-[VALOR] / Ch3:-[VALOR] / Ch4:-[VALOR] / Ch5:-[VALOR] / Ch6:-[VALOR] / Ch7:-[VALOR] / Ch8:-[VALOR]",
+                "regex": "Temp\\ Ch1:\\-\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch2:\\-\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch3:\\-\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch4:\\-\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch5:\\-\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch6:\\-\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch7:\\-\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch8:\\-\\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 30000.0,
+                "max": 30003.0,
+                "expected_count": 8
+            }
+        },
+        {
+            "nome": "Insira os plugs dos conectores CN9 (THERM.G1) e CN10 (THERM.G2) com os sinais + e - de cada um dos termopares interligados",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Insira os plugs dos conectores CN9 (THERM.G1) e CN10 (THERM.G2) com os sinais + e - de cada um dos termopares interligados (+T1 conectado a -T1, +T2 conectado a -T2, etc).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Liga a Saída 12V_IHM",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "modbus_comando",
+            "modbus_params": [
+                {
+                    "slave_id": 235,
+                    "function_code_display": "Write Single Register (0x06)",
+                    "function_code": "06",
+                    "address": 258,
+                    "quantity": 1,
+                    "value_type": "Register (16-bit)",
+                    "write_value": "0X2000",
+                    "expected_value": "0X2000",
+                    "min_limit": 0.0,
+                    "max_limit": 0.0
+                }
+            ],
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Conecte o módulo HandHeld ao Conector CN5 (CAN/IHM)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte o módulo HandHeld ao Conector CN5 (CAN/IHM).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Tempo 2",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "tempo_espera",
+            "duracao_espera_segundos": 2,
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste da Rede CAN",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "SET_TEST_CAN",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "Comando CAN enviado...",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste da Rede CAN",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "SET_TEST_CAN",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "*Teste da CAN realizado com SUCESSO!!",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Configuração para inversor Mitsubishi",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "SET_INV_MITSUBISHI",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "INVERSOR = MITSUBISHI",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Configuração da família do equipamento para Express",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "SET_MODELO_EXPRESS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "string_exata",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": "----FAMILIA = EXPRESS------",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Remova os plugs dos conectores CN12 (INPUTS G1) e CN13 (INPUTS G2)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Remova os plugs dos conectores CN12 (INPUTS G1) e CN13 (INPUTS G2).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verificação dos leds OFF das saídas digitais",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique se os leds O1, O2, O3, O4, O5, O6, O7, O8, O9, O10, 011, O12 estão apagados.",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Remova os plugs dos conectores CN14  (AN.OUT.) e CN11 (AN.INPUTS)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Remova os plugs dos conectores CN14  (AN.OUT.) e CN11 (AN.INPUTS).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste 1 de AN1 e AN2",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_SENSORS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": {
+                "simplified_text": "AN1: [VALOR]mV\nAtrib 0x5111: AN2: [VALOR]",
+                "regex": "AN1:\\ \\s*([-+]?\\d*\\.?\\d+)\\s*mV\\\nAtrib\\ 0x5111:\\ AN2:\\ ",
+                "min": 0.0,
+                "max": 9.0
+            }
+        },
+        {
+            "nome": "Teste 1 das Entradas digitais (OFF)",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_SENSORS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "param_validacao": {
+                "simplified_text": "Entradas: 0x[VALOR]",
+                "regex": "Entradas:\\ 0x\\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 0.0,
+                "max": 0.1
+            },
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Remova o plug do conector CN8  (VAC-IN)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Remova o plug do conector CN8  (VAC-IN)",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste 1 de VAC-IN = 0V",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_SENSORS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": {
+                "simplified_text": "Tensao AC: [VALOR]",
+                "regex": "Tensao\\ AC:\\ \\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 0.0,
+                "max": 250.0
+            }
+        },
+        {
+            "nome": "Remova o plug do conector CN7  (IAC-IN)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Remova o plug do conector CN7  (IAC-IN)",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste 1 de IAC-IN = 0A",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_SENSORS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "param_validacao": {
+                "simplified_text": "IAC: [VALOR]",
+                "regex": "IAC:\\ \\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 0.0,
+                "max": 16.0
+            },
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Saídas digitais = ON",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "modbus_comando",
+            "modbus_params": [
+                {
+                    "slave_id": 235,
+                    "function_code_display": "Write Single Register (0x06)",
+                    "function_code": "06",
+                    "address": 258,
+                    "quantity": 1,
+                    "value_type": "Register (16-bit)",
+                    "write_value": "0x0fff",
+                    "expected_value": "0x0fff",
+                    "min_limit": 0.0,
+                    "max_limit": 0.0
+                }
+            ],
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verificação dos leds ON das saídas digitais",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique se os leds O1, O2, O3, O4, O5, O6, O7, O8, O9, O10, 011, O12 estão acesos.",
+            "caminho_imagem": "",
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Insira os plugs dos conectores CN12 (INPUTS G1) e CN13 (INPUTS G2) com os jumpers",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Insira os plugs dos conectores CN12 (INPUTS G1) e CN13 (INPUTS G2) com os jumpers. Devem ser interligados os sinais GND/IN1/IN2/IN3/IN4 no conector CN12 e GND/IN5 no conector CN13.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste 2 das Entradas digitais (ON)",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_SENSORS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "param_validacao": {
+                "simplified_text": "Entradas: 0x[VALOR]f",
+                "regex": "Entradas:\\ 0x\\s*([-+]?\\d*\\.?\\d+)\\s*f",
+                "min": 0.0,
+                "max": 1.0
+            },
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Verifique se os leds IN1, IN2, IN3, IN4 e IN5 estão apagados",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Verifique se os leds IN1, IN2, IN3, IN4 e IN5 estão apagados.",
+            "caminho_imagem": ""
+        },
+        {
+            "nome": "Conecte o cabo de interligação dos conectores CN11 (AN.INPUTS) e CN14 (AN.OUT.)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Conecte o cabo de interligação dos conectores CN11 (AN.INPUTS) e CN14 (AN.OUT.).\n\nO sinal GND do conector de AN.OUT. deve ser ligado ao sinal - de AN1 e - de AN2 de CN11 (AN.INPUTS).\nJá o sinal DAC do conector de AN.OUT. deve ser ligado ao sinal + de AN1 e + de AN2 de CN11 (AN.INPUTS).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "DAC = 5V",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "modbus_comando",
+            "modbus_params": [
+                {
+                    "slave_id": 235,
+                    "function_code_display": "Write Single Register (0x06)",
+                    "function_code": "06",
+                    "address": 259,
+                    "quantity": 1,
+                    "value_type": "Register (16-bit)",
+                    "write_value": "0x1388",
+                    "expected_value": "0x1388",
+                    "min_limit": 0.0,
+                    "max_limit": 0.0
+                }
+            ],
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Tempo de espera",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "tempo_espera",
+            "duracao_espera_segundos": 2,
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Corrente IHM",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_SENSORS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": {
+                "simplified_text": "I-IHM: [VALOR]",
+                "regex": "I\\-IHM:\\ \\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 57.0,
+                "max": 200.0
+            },
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Alimente o conector CN8 (VAC-IN) com 220 Vac",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Alimente o conector CN8 (VAC-IN) com 220 Vac.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Aguarda tempo para atualização de AC220",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "tempo_espera",
+            "duracao_espera_segundos": 3,
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste 2 VAC-IN = 220V",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_SENSORS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "param_validacao": {
+                "simplified_text": "Tensao AC: [VALOR]",
+                "regex": "Tensao\\ AC:\\ \\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 210000.0,
+                "max": 230003.0
+            },
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Remova a alimentação de CN8  (VAC-IN)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Remova a alimentação de CN8  (VAC-IN)",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Insira o kit de simulação de corrente no conector CN7  (IAC-IN)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Insira o kit de simulação de corrente no conector CN7  (IAC-IN). Este kit é composto por um transformador de 220VAC->14VAC com um resistor em série de 1K (Corrente entre 13 e 15mA).",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Aguarda tempo para atualização de IAC-IN",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "tempo_espera",
+            "duracao_espera_segundos": 3,
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Remova o kit de teste do conector CN7  (IAC-IN)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Remova o kit de teste do conector CN7  (IAC-IN)",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste 2 IAC-IN = 13 a 15mA",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_SENSORS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_simples",
+            "param_validacao": {
+                "simplified_text": "IAC: [VALOR]",
+                "regex": "IAC:\\ \\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 18000.0,
+                "max": 30000.0
+            },
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste 2 de AN1 e AN2",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_SENSORS",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_multiplos",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": {
+                "simplified_text": "AN1: [VALOR]mV\nAtrib 0x5111: AN2: [VALOR]",
+                "regex": "AN1:\\ \\s*([-+]?\\d*\\.?\\d+)\\s*mV\\\nAtrib\\ 0x5111:\\ AN2:\\ \\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 4100.0,
+                "max": 5800.0,
+                "expected_count": 2
+            }
+        },
+        {
+            "nome": "Teste 2 do Termopar T1",
+            "checked_for_fast_mode": true,
+            "tipo_passo": "comando_validacao",
+            "port_type": "serial",
+            "comando_enviar": "PRINT_TEMPERATURES",
+            "esperar_resposta": true,
+            "timeout_ms": 1500,
+            "tipo_validacao": "texto_numerico_multiplos",
+            "use_rtc": false,
+            "rtc_mode": "",
+            "rtc_pattern": "",
+            "param_validacao": {
+                "simplified_text": "Temp Ch1:[VALOR] / Ch2:[VALOR] / Ch3:[VALOR] / Ch4:[VALOR] / Ch5:[VALOR] / Ch6:[VALOR] / Ch7:[VALOR] / Ch8:[VALOR]",
+                "regex": "Temp\\ Ch1:\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch2:\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch3:\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch4:\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch5:\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch6:\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch7:\\s*([-+]?\\d*\\.?\\d+)\\s*\\ /\\ Ch8:\\s*([-+]?\\d*\\.?\\d+)\\s*",
+                "min": 10.0,
+                "max": 35.0,
+                "expected_count": 8
+            },
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "DAC = 0V",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "modbus_comando",
+            "modbus_params": [
+                {
+                    "slave_id": 235,
+                    "function_code_display": "Write Single Register (0x06)",
+                    "function_code": "06",
+                    "address": 259,
+                    "quantity": 1,
+                    "value_type": "Register (16-bit)",
+                    "write_value": "0x0000",
+                    "expected_value": "0x0000",
+                    "min_limit": 0.0,
+                    "max_limit": 0.0
+                }
+            ],
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Saídas digitais = OFF",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "modbus_comando",
+            "modbus_params": [
+                {
+                    "slave_id": 235,
+                    "function_code_display": "Write Single Register (0x06)",
+                    "function_code": "06",
+                    "address": 258,
+                    "quantity": 1,
+                    "value_type": "Register (16-bit)",
+                    "write_value": "0x0000",
+                    "expected_value": "0x0000",
+                    "min_limit": 0.0,
+                    "max_limit": 0.0
+                }
+            ],
+            "status": "APROVADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Exceções do Teste: JTAG; Interface EXP.1 (SWD)",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Exceções do Teste: JTAG; Interface EXP.1 (SWD)",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        },
+        {
+            "nome": "Teste Concluído",
+            "checked_for_fast_mode": false,
+            "tipo_passo": "instrucao_manual",
+            "mensagem_instrucao": "Você concluiu o teste. Caso já tenha memorizado os passos da instrução inicial, digite o código 4237 no campo Enviar Comando Direto e pressione Enter. Isso desativará a exibição dos passos de instrução inicial.",
+            "caminho_imagem": "",
+            "status": "PULADO",
+            "last_error_detail": ""
+        }
+    ],
+    "port_configurations": {
+        "serial_command": {
+            "baud": "115200",
+            "data_bits": "8",
+            "parity": "Nenhuma",
+            "handshake": "Nenhum",
+            "mode": "Free"
+        },
+        "modbus": {
+            "baud": "9600",
+            "data_bits": "8",
+            "parity": "Nenhuma",
+            "handshake": "Nenhum",
+            "mode": "Free"
+        }
+    }
+}
