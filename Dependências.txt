@@ -1,1 +1,1 @@
-python -m pip install PyQt6 pyserial crcmod pandas matplotlib openpyxl XlsxWriter
+python -m pip install PyQt6 pyserial crcmod pandas matplotlib openpyxl XlsxWriter watchdog requests
