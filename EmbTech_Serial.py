@@ -15,6 +15,8 @@ from relatorio_eficiencia_widget import RelatorioEficienciaWidget
 from oled_timer_display import OledTimerDisplay
 from collections import deque
 from datetime import datetime
+import platform
+from openpyxl import Workbook, load_workbook
 
 
 from PyQt6.QtWidgets import (
@@ -421,7 +423,6 @@ class TestPortConfigDialog(QDialog):
         self.serial_handshake_combo.addItems(["Nenhum", "RTS/CTS", "XON/XOFF"])
         self.serial_handshake_combo.setCurrentText(current_serial_settings.get("handshake", "Nenhum"))
         serial_layout.addRow("Controle de Fluxo:", self.serial_handshake_combo)
-        
         self.serial_mode_combo = QComboBox()
         self.serial_mode_combo.addItems(["Free", "PortStore test", "Data", "Setup"])
         self.serial_mode_combo.setCurrentText(current_serial_settings.get("mode", "Free"))
@@ -691,6 +692,9 @@ class PlacaTesterApp(QMainWindow):
         self.editing_step_index = -1 # Índice do passo sendo editado no criador de teste
         
         self.log_interaction_count = 0 # Contador para limpar o log automaticamente
+        self.datalogger_enabled = False
+        self.datalogger_path = ""
+        self._datalogger_last_ts = None
 
         # Variáveis para o Modo Fast
         self.fast_mode_active = False # Estado atual do modo fast
@@ -1252,7 +1256,14 @@ class PlacaTesterApp(QMainWindow):
         # Remove a cor de fundo hardcoded do stylesheet para que a cor da paleta seja aplicada
         self.log_text_edit.setStyleSheet("font-size: 14px; font-family: 'Consolas', 'Courier New', monospace; border: 1px solid #d0d0d0; border-radius: 4px;")
         
-        left_panel.addWidget(QLabel("Dados Recebidos/Enviados:"))
+        header_row = QHBoxLayout()
+        header_row.addWidget(QLabel("Dados Recebidos/Enviados:"))
+        self.datalogger_cb = QCheckBox("DataLogger")
+        self.datalogger_cb.setChecked(False)
+        self.datalogger_cb.toggled.connect(self._toggle_datalogger)
+        header_row.addWidget(self.datalogger_cb)
+        header_row.addStretch(1)
+        left_panel.addLayout(header_row)
         left_panel.addWidget(self.log_text_edit)
 
         # Configura o menu de contexto para o log
@@ -1820,16 +1831,8 @@ class PlacaTesterApp(QMainWindow):
         
 
     def _check_fast_mode_activation(self):
-        """Verifica se o código secreto digitado ativa o modo Fast."""
-        if not self.fast_mode_active and self.fast_mode_code_input.text().strip() == self.fast_mode_secret_code:
-            self.fast_mode_active = False
-            self.fast_mode_code_input.setEnabled(False)
-            #self.log_message("Modo Fast ATIVADO com sucesso. Agora você pode usar testes otimizados.", "sistema")
-            self.fast_mode_code_input.setText("")
-            self._update_fast_mode_status_label()
-                #self.fast_mode_active = True
-                #self.fast_mode_code_input.setEnabled(False)
-                #self.log_message("Modo Fast ATIVADO com sucesso. Agora você pode usar testes otimizados.", "sistema")
+        """Campo de configuração: não alterna o Modo Fast nem gera log."""
+        return
 
     def _init_test_creator_ui(self):
         """
@@ -1862,10 +1865,9 @@ class PlacaTesterApp(QMainWindow):
         self.fast_mode_code_input.setFixedWidth(200) # Ajusta a largura
         # Validador para garantir apenas 4 dígitos numéricos
         self.fast_mode_code_input.setValidator(QRegularExpressionValidator(QRegularExpression(r"^\d{0,4}$")))
-        self.fast_mode_code_input.textChanged.connect(self._check_fast_mode_activation)
+        # Campo usado apenas para configuração; nenhuma ação ao digitar
         fast_mode_layout.addWidget(self.fast_mode_code_input)
         fast_mode_layout.addStretch(1) # Empurra o campo para a esquerda
-        self.fast_mode_code_input.textChanged.connect(self._check_fast_mode_activation)
         test_creator_layout.addLayout(fast_mode_layout)
 
         # Grupo para adicionar/editar passos de teste
@@ -3917,13 +3919,12 @@ class PlacaTesterApp(QMainWindow):
                 self.direct_command_input.clear()
             return
 
-        # Verifica se o comando é o código secreto do modo fast
+        # Alterna o Modo Fast apenas quando o comando digitado for o código secreto salvo
         if self.fast_mode_secret_code and command == self.fast_mode_secret_code:
             self.fast_mode_active = not self.fast_mode_active
             self._update_fast_mode_status_label()
-            self.direct_command_input.clear() # Limpa o input após alternar o modo
-            # Não envia o código secreto para a porta serial se ele for usado apenas para alternar o modo interno
-            return 
+            self.direct_command_input.clear()
+            return
 
         # Seleciona a porta alvo de acordo com o seletor
         target_name = self.send_target_port_combo.currentText() if hasattr(self, 'send_target_port_combo') else "Principal"
@@ -4107,12 +4108,7 @@ class PlacaTesterApp(QMainWindow):
         else: # Se for serial principal (string)
             self.log_message(f"Recebido: {data}", "recebido") 
 
-        # Verifica o código secreto do modo fast
-        # A validação do código secreto só faz sentido para a porta principal
-        if source_port_name == "Principal" and self.fast_mode_secret_code and isinstance(data, str) and data.strip() == self.fast_mode_secret_code:
-            self.fast_mode_active = not self.fast_mode_active # Alterna o estado
-            self._update_fast_mode_status_label()
-            return # Não processa como dado normal se for o código secreto
+        
 
     def _update_fast_mode_status_label(self):
         """
@@ -4130,6 +4126,32 @@ class PlacaTesterApp(QMainWindow):
                 break
 
         color = self.LOG_COLORS.get(msg_type, self.LOG_COLORS["informacao"])
+
+        try:
+            if self.datalogger_enabled and self.datalogger_path:
+                ts = datetime.now()
+                if self._datalogger_last_ts is None:
+                    latency_ms = 0.0
+                else:
+                    latency_ms = (ts - self._datalogger_last_ts).total_seconds() * 1000.0
+                self._datalogger_last_ts = ts
+                try:
+                    if os.path.exists(self.datalogger_path):
+                        wb = load_workbook(self.datalogger_path)
+                        ws = wb.active
+                    else:
+                        wb = Workbook()
+                        ws = wb.active
+                        ws.title = "DataLogger"
+                        ws.append(["DataHora", "Tipo", "Enviado", "Recebido", "Latencia_ms"])
+                    sent_val = message if msg_type == "enviado" else ""
+                    recv_val = message if msg_type == "recebido" else ""
+                    ws.append([ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3], msg_type, sent_val, recv_val, round(latency_ms, 3)])
+                    wb.save(self.datalogger_path)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         self.log_interaction_count += 1
         if self.log_interaction_count >= 1500: # Limite de interações para limpar o log
@@ -4171,6 +4193,52 @@ class PlacaTesterApp(QMainWindow):
         self.log_text_edit.clear()
         self.log_text_edit.append(f"<font color='#AAAAAA'>--- Terminal Limpo ---</font>")
         self.log_interaction_count = 0 # Reseta o contador de interações
+
+    def _choose_datalogger_file(self):
+        """Permite escolher/criar a planilha do DataLogger (.xlsx) e prepara cabeçalhos."""
+        try:
+            default_name = datetime.now().strftime("EmbTech_DataLogger_%Y%m%d_%H%M%S.xlsx")
+            path, _ = QFileDialog.getSaveFileName(self, "Selecionar arquivo do DataLogger", default_name, "Planilhas Excel (*.xlsx)")
+            if not path:
+                return
+            if not path.lower().endswith(".xlsx"):
+                path += ".xlsx"
+            try:
+                if not os.path.exists(path):
+                    wb = Workbook()
+                    ws = wb.active
+                    ws.title = "DataLogger"
+                    ws.append(["DataHora", "Tipo", "Enviado", "Recebido", "Latencia_ms"])
+                    wb.save(path)
+            except Exception as e:
+                QMessageBox.warning(self, "Erro", f"Não foi possível criar o arquivo:\n{e}")
+                return
+            self.datalogger_path = path
+            if self.datalogger_cb.isChecked():
+                self._datalogger_last_ts = None
+            QMessageBox.information(self, "DataLogger", f"Arquivo selecionado:\n{self.datalogger_path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Erro", f"Falha ao selecionar arquivo do DataLogger:\n{e}")
+
+    def _toggle_datalogger(self, checked):
+        """Liga/desliga o DataLogger e garante que haja um arquivo válid."""
+        try:
+            if checked:
+                if not self.datalogger_path:
+                    self._choose_datalogger_file()
+                    if not self.datalogger_path:
+                        self.datalogger_cb.blockSignals(True)
+                        self.datalogger_cb.setChecked(False)
+                        self.datalogger_cb.blockSignals(False)
+                        return
+                self._datalogger_last_ts = None
+                self.datalogger_enabled = True
+                self.log_message("DataLogger ATIVADO.", "sistema")
+            else:
+                self.datalogger_enabled = False
+                self.log_message("DataLogger DESATIVADO.", "sistema")
+        except Exception as e:
+            QMessageBox.warning(self, "Erro", f"Falha ao alternar DataLogger:\n{e}")
 
 
     def _load_test_file(self):
