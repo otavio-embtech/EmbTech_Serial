@@ -1460,7 +1460,7 @@ class PlacaTesterApp(QMainWindow):
         all_filled = all(input_widget.text().strip() for input_widget in self.send_command_inputs)
         
         # Se todos estão preenchidos e ainda não temos muitos campos, adiciona nova linha
-        if all_filled and len(self.send_command_inputs) < 20:  # Limite máximo de 20 linhas
+        if all_filled and len(self.send_command_inputs) < 40:  # Limite máximo de 40 linhas
             self._add_command_line()
     
     def _remove_empty_lines(self):
