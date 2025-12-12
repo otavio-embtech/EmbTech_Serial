@@ -623,7 +623,7 @@ class PlacaTesterApp(QMainWindow):
 
         # Carrega o último operador de teste salvo logo na inicialização da aplicação
         self._load_last_test_operator() 
-        self.setWindowTitle("EmbTech Serial")
+        self.setWindowTitle(f"EmbTech Serial v{self.VERSION}")
         self.setGeometry(100, 100, 1050, 780)
         # Define limites de tamanho para evitar janela fora da tela
         # Ajustado o tamanho mínimo para garantir que o conteúdo seja visível
@@ -646,6 +646,13 @@ class PlacaTesterApp(QMainWindow):
         # Armazenar as portas atualmente listadas para evitar atualizações desnecessárias da UI
         self.current_serial_ports = []
         self.current_modbus_ports = []
+        
+        # Variável para rastrear se o usuário está digitando
+        self.user_is_typing = False
+        self.typing_timer = QTimer(self)
+        self.typing_timer.setSingleShot(True)
+        self.typing_timer.timeout.connect(self._on_typing_finished)
+        
         # Instâncias de portas seriais e threads de leitura
         self.serial_command_ser = None
         self.modbus_ser = None
@@ -678,7 +685,12 @@ class PlacaTesterApp(QMainWindow):
         self.auto_send_timers = []
         self.auto_send_checkboxes = []
         self.auto_send_config_buttons = []
-        self.auto_send_intervals_s = [1.0] * 4 # Intervalos padrão para os 4 timers de auto-envio
+        self.auto_send_intervals_s = [] # Intervalos para timers de auto-envio (inicialmente vazio)
+        
+        # Variáveis para controle dinâmico de linhas
+        self.max_visible_lines = 4  # Máximo de linhas visíveis sem scrollbar
+        self.send_scroll_widget = None  # Widget para conter as linhas com scrollbar
+        self.send_scroll_area = None  # Scroll area para as linhas
 
         # Define o caminho base para arquivos de configuração
         if getattr(sys, 'frozen', False):
@@ -730,6 +742,47 @@ class PlacaTesterApp(QMainWindow):
         from oled_timer_display import OledTimerDisplay
         self.oled = OledTimerDisplay()
         self.oled.hide()
+
+    def keyPressEvent(self, event):
+        """
+        Captura eventos de teclado para implementar atalhos.
+        """
+        key = event.text().upper()
+        
+        # Se o usuário está digitando em um campo de texto, não processa atalhos
+        if self.user_is_typing:
+            super().keyPressEvent(event)
+            return
+            
+        # Processa atalhos apenas quando não está digitando
+        if key == 'C' and not self.user_is_typing:
+            # C = Carregar Arquivo de Teste
+            if self.load_test_button.isEnabled():
+                self._load_test_file()
+        elif key == 'I' and not self.user_is_typing:
+            # I = Iniciar Teste
+            if self.start_test_button.isEnabled():
+                self._prompt_for_test_info()
+        elif key == 'P' and not self.user_is_typing:
+            # P = Pausar/Parar Teste
+            if self.stop_test_button.isEnabled():
+                self._stop_test()
+        else:
+            super().keyPressEvent(event)
+    
+    def _on_user_typing(self):
+        """
+        Chamado quando o usuário começa a digitar em um campo de texto.
+        """
+        self.user_is_typing = True
+        # Reinicia o timer para detectar quando a digitação termina
+        self.typing_timer.start(1000)  # 1 segundo após a última tecla
+    
+    def _on_typing_finished(self):
+        """
+        Chamado quando o timer de digitação expira, indicando que o usuário parou de digitar.
+        """
+        self.user_is_typing = False
 
     def _load_last_test_operator(self):
         self.config.read(self.CONFIG_FILE_TEST_OPERATOR)
@@ -1023,7 +1076,7 @@ class PlacaTesterApp(QMainWindow):
                 QListWidget {
                     border: 1px solid #606060;
                     border-radius: 4px;
-                    background-color: #4a4a4a;
+                    background-color: #2b2b2b; /* Cor do fundo principal do app */
                     color: #e0e0e0;
                     padding: 5px;
                 }
@@ -1196,7 +1249,7 @@ class PlacaTesterApp(QMainWindow):
                 QListWidget {
                     border: 1px solid #a0a0a0;
                     border-radius: 4px;
-                    background-color: #fefefe; /* Branco quase bege para listas */
+                    background-color: #f0f0f0; /* Cor do fundo principal do app */
                     padding: 5px;
                 }
                 QListWidget::item {
@@ -1231,7 +1284,7 @@ class PlacaTesterApp(QMainWindow):
 
     def _init_ui(self):
         """
-        Inicializa os componentes da interface do usuário para a aba "Terminal".
+        Inicializa a interface do usuário do terminal.
         """
         self.tab_widget = QTabWidget(self)
         self.setCentralWidget(self.tab_widget) # Define o QTabWidget como o widget central
@@ -1264,7 +1317,7 @@ class PlacaTesterApp(QMainWindow):
         header_row.addWidget(self.datalogger_cb)
         header_row.addStretch(1)
         left_panel.addLayout(header_row)
-        left_panel.addWidget(self.log_text_edit)
+        left_panel.addWidget(self.log_text_edit, 1)
 
         # Configura o menu de contexto para o log
         self.log_text_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1279,6 +1332,7 @@ class PlacaTesterApp(QMainWindow):
         self.direct_command_input.setPlaceholderText("Digite seu comando aqui...")
         self.direct_command_input.setEnabled(False) # Desabilitado até a porta ser conectada
         self.direct_command_input.returnPressed.connect(self._send_direct_command) # Envia ao pressionar Enter
+        self.direct_command_input.textChanged.connect(self._on_user_typing) # Detecta quando usuário está digitando
         direct_send_layout.addWidget(self.direct_command_input)
 
         # Novo: seletor de porta para envio direto e pré-configurados
@@ -1307,48 +1361,276 @@ class PlacaTesterApp(QMainWindow):
         # Grupo para comandos pré-configurados e envio automático
         send_group = QGroupBox("Comandos Pré-configurados (Envio Automático/Manual)")
         send_layout = QVBoxLayout(send_group)
-
-        for i in range(4): # Cria 4 linhas para comandos pré-configurados
-            single_command_line_layout = QHBoxLayout()
-
-            send_input = QLineEdit()
-            send_input.setPlaceholderText(f"Comando {i+1}")
-            send_input.setEnabled(False)
-            
-            send_button = QPushButton("Enviar")
-            send_button.setEnabled(False)
-            send_button.clicked.connect(lambda _, idx=i: self._send_command_button_clicked(idx)) # Usa lambda para passar o índice
-            
-            auto_send_cb = QCheckBox("Auto Enviar")
-            auto_send_cb.setChecked(False)
-            auto_send_cb.setEnabled(False)
-            
-            config_timer_btn = QPushButton("Configurar Timer")
-            config_timer_btn.setEnabled(False)
-            config_timer_btn.clicked.connect(lambda _, idx=i: self._open_timer_config_dialog(idx))
-
-            single_command_line_layout.addWidget(send_input, 1)
-            single_command_line_layout.addWidget(send_button)
-            single_command_line_layout.addWidget(auto_send_cb)
-            single_command_line_layout.addWidget(config_timer_btn)
-            
-            send_layout.addLayout(single_command_line_layout)
-            
-            # Armazena os widgets em listas para acesso posterior
-            self.send_command_inputs.append(send_input)
-            self.send_buttons.append(send_button)
-            self.auto_send_checkboxes.append(auto_send_cb)
-            self.auto_send_config_buttons.append(config_timer_btn)
-
-            # Configura o timer para auto-envio
-            auto_timer = QTimer(self)
-            auto_timer.timeout.connect(lambda checked=False, idx=i: self._send_command_for_auto_send(idx))
-            self.auto_send_timers.append(auto_timer)
-            
-            auto_send_cb.stateChanged.connect(lambda state, idx=i: self._toggle_auto_send_timer(state, idx))
-            
+        
+        # Cria uma scroll area para as linhas de comando
+        self.send_scroll_area = QScrollArea()
+        self.send_scroll_area.setWidgetResizable(True)
+        self.send_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.send_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        # Widget interno para conter as linhas
+        self.send_scroll_widget = QWidget()
+        self.send_scroll_layout = QVBoxLayout(self.send_scroll_widget)
+        
+        # Inicializa com 4 linhas
+        self._initialize_command_lines(4)
+        
+        # Configura a scroll area
+        self.send_scroll_area.setWidget(self.send_scroll_widget)
+        
+        # Adiciona a scroll area ao layout
+        send_layout.addWidget(self.send_scroll_area)
+        
         left_panel.addWidget(send_group)
-        main_layout.addLayout(left_panel, 2) # Adiciona o painel esquerdo ao layout principal
+        main_layout.addLayout(left_panel, 1) # Reduzindo espa�o para dar mais destaque ao terminal
+
+        # Painel direito (configuração de portas e controle de teste)
+        right_panel = QVBoxLayout()
+            
+    def _initialize_command_lines(self, num_lines):
+        """
+        Inicializa o número especificado de linhas de comando.
+        """
+        for i in range(num_lines):
+            self._add_command_line()
+    
+    def _add_command_line(self):
+        """
+        Adiciona uma nova linha de comando dinamicamente.
+        """
+        index = len(self.send_command_inputs)
+        
+        single_command_line_layout = QHBoxLayout()
+
+        send_input = QLineEdit()
+        send_input.setPlaceholderText(f"Comando {index+1}")
+        # Verifica se a porta serial está conectada para habilitar/desabilitar o campo
+        is_serial_command_connected = (self.serial_command_ser is not None and self.serial_command_ser.is_open)
+        send_input.setEnabled(is_serial_command_connected)
+        
+        # Conecta o sinal de texto alterado para verificar se precisa adicionar nova linha
+        send_input.textChanged.connect(self._check_and_add_new_line)
+        send_input.textChanged.connect(self._on_user_typing) # Detecta quando usuário está digitando
+        
+        send_button = QPushButton("Enviar")
+        send_button.setEnabled(is_serial_command_connected)
+        send_button.clicked.connect(lambda _, idx=index: self._send_command_button_clicked(idx))
+        
+        auto_send_cb = QCheckBox("Auto Enviar")
+        auto_send_cb.setChecked(False)
+        auto_send_cb.setEnabled(is_serial_command_connected)
+        
+        config_timer_btn = QPushButton("Configurar Timer")
+        config_timer_btn.setEnabled(is_serial_command_connected)
+        config_timer_btn.clicked.connect(lambda _, idx=index: self._open_timer_config_dialog(idx))
+
+        single_command_line_layout.addWidget(send_input, 1)
+        single_command_line_layout.addWidget(send_button)
+        single_command_line_layout.addWidget(auto_send_cb)
+        single_command_line_layout.addWidget(config_timer_btn)
+        
+        self.send_scroll_layout.addLayout(single_command_line_layout)
+        
+        # Armazena os widgets em listas para acesso posterior
+        self.send_command_inputs.append(send_input)
+        self.send_buttons.append(send_button)
+        self.auto_send_checkboxes.append(auto_send_cb)
+        self.auto_send_config_buttons.append(config_timer_btn)
+        self.auto_send_intervals_s.append(1.0)  # Intervalo padrão
+
+        # Configura o timer para auto-envio
+        auto_timer = QTimer(self)
+        auto_timer.timeout.connect(lambda checked=False, idx=index: self._send_command_for_auto_send(idx))
+        self.auto_send_timers.append(auto_timer)
+        
+        auto_send_cb.stateChanged.connect(lambda state, idx=index: self._toggle_auto_send_timer(state, idx))
+        
+        # Atualiza a altura da scroll area conforme necessário
+        self._update_scroll_area_size()
+    
+    def _check_and_add_new_line(self):
+        """
+        Verifica se todos os campos atuais estão preenchidos e adiciona uma nova linha se necessário.
+        Também remove linhas vazias.
+        """
+        # Remove linhas vazias (exceto a última se for a única)
+        self._remove_empty_lines()
+        
+        # Verifica se todos os campos atuais estão preenchidos
+        all_filled = all(input_widget.text().strip() for input_widget in self.send_command_inputs)
+        
+        # Se todos estão preenchidos e ainda não temos muitos campos, adiciona nova linha
+        if all_filled and len(self.send_command_inputs) < 20:  # Limite máximo de 20 linhas
+            self._add_command_line()
+    
+    def _remove_empty_lines(self):
+        """
+        Remove linhas que estão vazias (mantém pelo menos uma linha).
+        """
+        # Encontra índices das linhas vazias (do final para o início)
+        empty_indices = []
+        for i in range(len(self.send_command_inputs) - 1, -1, -1):  # Do final para o início
+            if not self.send_command_inputs[i].text().strip():
+                empty_indices.append(i)
+        
+        # Remove linhas vazias, mas mantém pelo menos uma linha
+        lines_to_remove = empty_indices
+        if len(lines_to_remove) >= len(self.send_command_inputs):
+            lines_to_remove = lines_to_remove[:-1]  # Mantém a última linha
+        
+        # Remove as linhas vazias
+        for index in sorted(lines_to_remove, reverse=True):  # Remove do maior índice para o menor
+            self._remove_command_line(index)
+    
+    def _remove_command_line(self, index):
+        """
+        Remove uma linha de comando específica.
+        """
+        if index < 0 or index >= len(self.send_command_inputs):
+            return
+        
+        # Para o timer se estiver ativo
+        if index < len(self.auto_send_timers):
+            self.auto_send_timers[index].stop()
+        
+        # Remove os widgets da lista
+        self.send_command_inputs.pop(index)
+        self.send_buttons.pop(index)
+        self.auto_send_checkboxes.pop(index)
+        self.auto_send_config_buttons.pop(index)
+        self.auto_send_intervals_s.pop(index)
+        self.auto_send_timers.pop(index)
+        
+        # Remove o layout da linha do layout principal
+        if index < self.send_scroll_layout.count():
+            item = self.send_scroll_layout.itemAt(index)
+            if item and item.layout():
+                # Remove todos os widgets do layout
+                while item.layout().count():
+                    widget = item.layout().takeAt(0).widget()
+                    if widget:
+                        widget.deleteLater()
+                # Remove o layout
+                self.send_scroll_layout.removeItem(item)
+        
+        # Atualiza a altura da scroll area
+        self._update_scroll_area_size()
+    
+    def _update_scroll_area_size(self):
+        """
+        Atualiza o tamanho da scroll area com base no número de linhas.
+        """
+        num_lines = len(self.send_command_inputs)
+        
+        if num_lines <= self.max_visible_lines:
+            # Se tiver 4 ou menos linhas, não mostra scrollbar
+            self.send_scroll_area.setMinimumHeight(num_lines * 40)  # 40px por linha (reduzido de 60px)
+        else:
+            # Se tiver mais de 4 linhas, mostra scrollbar com altura fixa para 4 linhas
+            self.send_scroll_area.setMinimumHeight(self.max_visible_lines * 40)  # 160px total (4x40)
+            self.send_scroll_area.setMaximumHeight(self.max_visible_lines * 40)  # 160px total (4x40)
+
+    def _init_ui(self):
+        """
+        Inicializa a interface do usuário do terminal.
+        """
+        self.tab_widget = QTabWidget(self)
+        self.setCentralWidget(self.tab_widget) # Define o QTabWidget como o widget central
+  
+        main_tab_widget = QWidget()
+        main_layout = QHBoxLayout(main_tab_widget)
+        self.tab_widget.addTab(main_tab_widget, "Terminal") # Adiciona a aba "Terminal"
+        self.main_tab_widget = main_tab_widget
+
+        # Painel esquerdo (log de comunicação e envio de comandos)
+        left_panel = QVBoxLayout()
+        self.log_text_edit = QTextEdit()
+        self.log_text_edit.setObjectName("log_text_edit") # Adiciona objectName para QSS
+        self.log_text_edit.setReadOnly(True) # Torna o log somente leitura
+        
+        # Define a cor de fundo do terminal para se adaptar ao tema do sistema
+        # A cor de fundo será definida pelo stylesheet, então removemos a definição via palette aqui
+        # palette = self.log_text_edit.palette()
+        # palette.setColor(QPalette.ColorRole.Base, QApplication.palette().color(QPalette.ColorRole.Base))
+        # self.log_text_edit.setPalette(palette)
+        
+        # Remove a cor de fundo hardcoded do stylesheet para que a cor da paleta seja aplicada
+        self.log_text_edit.setStyleSheet("font-size: 14px; font-family: 'Consolas', 'Courier New', monospace; border: 1px solid #d0d0d0; border-radius: 4px;")
+        
+        header_row = QHBoxLayout()
+        header_row.addWidget(QLabel("Dados Recebidos/Enviados:"))
+        self.datalogger_cb = QCheckBox("DataLogger")
+        self.datalogger_cb.setChecked(False)
+        self.datalogger_cb.toggled.connect(self._toggle_datalogger)
+        header_row.addWidget(self.datalogger_cb)
+        header_row.addStretch(1)
+        left_panel.addLayout(header_row)
+        left_panel.addWidget(self.log_text_edit, 1)
+
+        # Configura o menu de contexto para o log
+        self.log_text_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.log_text_edit.customContextMenuRequested.connect(self._show_log_context_menu)
+
+
+        # Grupo para envio de comando direto
+        direct_send_group = QGroupBox("Enviar Comando Direto")
+        direct_send_layout = QHBoxLayout(direct_send_group)
+        
+        self.direct_command_input = QLineEdit()
+        self.direct_command_input.setPlaceholderText("Digite seu comando aqui...")
+        self.direct_command_input.setEnabled(False) # Desabilitado até a porta ser conectada
+        self.direct_command_input.returnPressed.connect(self._send_direct_command) # Envia ao pressionar Enter
+        self.direct_command_input.textChanged.connect(self._on_user_typing) # Detecta quando usuário está digitando
+        direct_send_layout.addWidget(self.direct_command_input)
+
+        # Novo: seletor de porta para envio direto e pré-configurados
+        self.send_target_port_combo = QComboBox()
+        self.send_target_port_combo.addItems(["Principal", "Modbus"])  # Porta alvo do envio
+        self.send_target_port_combo.setCurrentText("Principal")
+        self.send_target_port_combo.setEnabled(False)
+        direct_send_layout.addWidget(self.send_target_port_combo)
+        # Ao selecionar Modbus, exibe/expande a configuração Modbus para conectar
+        self.send_target_port_combo.currentTextChanged.connect(self._on_send_target_changed)
+
+        # Opção: exibir resposta Modbus como texto (para testes unitários)
+        self.modbus_display_text_cb = QCheckBox("Texto")
+        self.modbus_display_text_cb.setToolTip("Exibir respostas Modbus como texto (ASCII)")
+        self.modbus_display_text_cb.setChecked(True)
+        self.modbus_display_text_cb.setEnabled(False)
+        direct_send_layout.addWidget(self.modbus_display_text_cb)
+
+        self.direct_send_button = QPushButton("Enviar")
+        self.direct_send_button.setEnabled(False) # Desabilitado até a porta ser conectada
+        self.direct_send_button.clicked.connect(self._send_direct_command)
+        direct_send_layout.addWidget(self.direct_send_button)
+
+        left_panel.addWidget(direct_send_group)
+
+        # Grupo para comandos pré-configurados e envio automático
+        send_group = QGroupBox("Comandos Pré-configurados (Envio Automático/Manual)")
+        send_layout = QVBoxLayout(send_group)
+        
+        # Cria uma scroll area para as linhas de comando
+        self.send_scroll_area = QScrollArea()
+        self.send_scroll_area.setWidgetResizable(True)
+        self.send_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.send_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        # Widget interno para conter as linhas
+        self.send_scroll_widget = QWidget()
+        self.send_scroll_layout = QVBoxLayout(self.send_scroll_widget)
+        
+        # Inicializa com 4 linhas
+        self._initialize_command_lines(4)
+        
+        # Configura a scroll area
+        self.send_scroll_area.setWidget(self.send_scroll_widget)
+        
+        # Adiciona a scroll area ao layout
+        send_layout.addWidget(self.send_scroll_area)
+        
+        left_panel.addWidget(send_group)
+        main_layout.addLayout(left_panel, 1) # Reduzindo espa�o para dar mais destaque ao terminal
 
         # Painel direito (configuração de portas e controle de teste)
         right_panel = QVBoxLayout()
@@ -3611,7 +3893,8 @@ class PlacaTesterApp(QMainWindow):
                     self.direct_send_button.setEnabled(True)
                     self.send_target_port_combo.setEnabled(True)
                     self.modbus_display_text_cb.setEnabled(True)
-                    self.direct_command_input.setFocus()
+                    # Remove o setFocus() para não impedir atalhos de teclado quando conecta porta
+                    # self.direct_command_input.setFocus()
 
                     for i in range(len(self.send_command_inputs)):
                         self.send_command_inputs[i].setEnabled(True)
@@ -4521,6 +4804,8 @@ class PlacaTesterApp(QMainWindow):
         from socket import gethostname
         import platform
 
+        # Reseta a flag de teste finalizado ao iniciar um novo teste
+        self._test_finished = False
         self.test_log_entries = []  # Limpa o log do teste atual
         self.test_start_time = datetime.now()  # Registra o tempo de início
 
@@ -5787,6 +6072,11 @@ class PlacaTesterApp(QMainWindow):
         """
         Finaliza o teste, exibe os resultados, gera o arquivo de log e redefine os controles.
         """
+        # Evita múltiplas execuções do método
+        if hasattr(self, '_test_finished') and self._test_finished:
+            return
+        
+        self._test_finished = True
         self.test_in_progress = False
         self.test_timer.stop()
         self.log_message("TESTE CONCLUÍDO", "sistema")
@@ -5921,8 +6211,9 @@ class PlacaTesterApp(QMainWindow):
         is_serial_command_connected = (self.serial_command_ser is not None and self.serial_command_ser.is_open)
         self.direct_command_input.setEnabled(is_serial_command_connected)
         self.direct_send_button.setEnabled(is_serial_command_connected)
-        if is_serial_command_connected:
-            self.direct_command_input.setFocus()
+        # Remove o setFocus() para não impedir atalhos de teclado após o fim do teste
+        # if is_serial_command_connected:
+        #     self.direct_command_input.setFocus()
 
         for i in range(len(self.send_command_inputs)):
             self.send_command_inputs[i].setEnabled(is_serial_command_connected)
@@ -5963,7 +6254,7 @@ class PlacaTesterApp(QMainWindow):
             "modbus_mode": "Free",
             "modbus_dtr": False, # Adicionado DTR padrão
             "modbus_rts": False, # Adicionado RTS padrão
-            "auto_send_lines": [{"command": "", "auto_send_checked": False, "interval_seconds": 1.0}] * 4,
+            "auto_send_lines": [],
             "last_pr_number": "",
             "last_serial_number": ""
         }
@@ -6070,6 +6361,14 @@ class PlacaTesterApp(QMainWindow):
 
             # Carrega configurações das linhas de auto-envio
             loaded_lines = settings.get("auto_send_lines", [])
+            
+            # Se tiver mais linhas salvas que as atuais, adiciona linhas extras
+            if len(loaded_lines) > len(self.send_command_inputs):
+                additional_lines = len(loaded_lines) - len(self.send_command_inputs)
+                for _ in range(additional_lines):
+                    self._add_command_line()
+            
+            # Carrega as configurações para todas as linhas disponíveis
             for i in range(min(len(loaded_lines), len(self.send_command_inputs))):
                 line_config = loaded_lines[i]
                 self.send_command_inputs[i].setText(line_config.get("command", ""))
