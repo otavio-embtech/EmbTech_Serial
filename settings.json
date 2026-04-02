@@ -1,6 +1,6 @@
 {
-    "serial_command_port": "COM6",
-    "modbus_port": "COM9",
+    "serial_command_port": "COM3",
+    "modbus_port": "COM1",
     "serial_baud": "115200",
     "serial_data_bits": "8",
     "serial_parity": "Nenhuma",
@@ -13,30 +13,209 @@
     "modbus_parity": "Nenhuma",
     "modbus_handshake": "Nenhum",
     "modbus_mode": "Free",
-    "modbus_dtr": false,
-    "modbus_rts": false,
+    "modbus_dtr": true,
+    "modbus_rts": true,
     "auto_send_lines": [
         {
             "command": "HELP",
             "auto_send_checked": false,
-            "interval_seconds": 1.5
+            "interval_seconds": 1.0
         },
         {
             "command": "PRINT_SENSORS",
             "auto_send_checked": false,
-            "interval_seconds": 3.0
+            "interval_seconds": 1.0
         },
         {
-            "command": "SET_RESET_POWER",
+            "command": "SET_MODELO_FIT_LITE",
             "auto_send_checked": false,
-            "interval_seconds": 2.3
+            "interval_seconds": 1.0
         },
         {
-            "command": "SET_ANALOG_MONITOR=ON;",
+            "command": "PRINT_INVERTER",
+            "auto_send_checked": false,
+            "interval_seconds": 1.0
+        },
+        {
+            "command": "",
             "auto_send_checked": false,
             "interval_seconds": 1.0
         }
     ],
-    "last_pr_number": "14237",
-    "last_serial_number": "16814/16"
+    "last_pr_number": "04237",
+    "last_serial_number": "14822/7",
+    "datalogger_settings": {
+        "file_path": "C:/Users/Assistencia01/Documents/EmbTechSerial/DataLogger/EmbTech_DataLogger_20260402_100111.xlsx",
+        "sheet_name": "DataLogger",
+        "header_row": 1,
+        "enabled_types": [
+            "recebido"
+        ],
+        "capture_mode": "snapshot",
+        "snapshot_window_ms": 1200,
+        "preview_history_size": 80,
+        "preset_name": "PRINT_SENSORS EmbTech",
+        "base_columns": {
+            "timestamp": "A",
+            "type": "B",
+            "port": "C",
+            "latency_ms": "D",
+            "message": "E"
+        },
+        "rules": [
+            {
+                "enabled": true,
+                "header": "Entradas",
+                "column": "F",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Entradas:\\s*(0x[0-9A-Fa-f]+)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Camara_C",
+                "column": "G",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Camara:\\s*([-+]?\\d+(?:\\.\\d+)?)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Vapor_RI_C",
+                "column": "H",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Vapor/RI:\\s*([-+]?\\d+(?:\\.\\d+)?)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Sonda_Geral_C",
+                "column": "I",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Sonda Geral:\\s*([-+]?\\d+(?:\\.\\d+)?)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Placa_C",
+                "column": "J",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Placa:\\s*([-+]?\\d+(?:\\.\\d+)?)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Sonda_1_C",
+                "column": "K",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Sonda 1:\\s*([-+]?\\d+(?:\\.\\d+)?)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Sonda_2_C",
+                "column": "L",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Sonda 2:\\s*([-+]?\\d+(?:\\.\\d+)?)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Sonda_3_C",
+                "column": "M",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Sonda 3:\\s*([-+]?\\d+(?:\\.\\d+)?)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Sonda_4_C",
+                "column": "N",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Sonda 4:\\s*([-+]?\\d+(?:\\.\\d+)?)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Sonda_5_C",
+                "column": "O",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Sonda 5:\\s*([-+]?\\d+(?:\\.\\d+)?)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Sonda_6_C",
+                "column": "P",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Sonda 6:\\s*([-+]?\\d+(?:\\.\\d+)?)",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "AN1_mV",
+                "column": "Q",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "AN1:\\s*([-+]?\\d+(?:\\.\\d+)?)mV",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "AN2_mV",
+                "column": "R",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "AN2:\\s*([-+]?\\d+(?:\\.\\d+)?)mV",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Tensao_AC_mV",
+                "column": "S",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Tensao AC:\\s*([-+]?\\d+(?:\\.\\d+)?)mV",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "IAC_mA",
+                "column": "T",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "IAC:\\s*([-+]?\\d+(?:\\.\\d+)?)mA",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "I_IHM_mA",
+                "column": "U",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "I-IHM:\\s*([-+]?\\d+(?:\\.\\d+)?)mA",
+                "value_mode": "group1"
+            },
+            {
+                "enabled": true,
+                "header": "Ult_Vol_ml",
+                "column": "V",
+                "message_type": "recebido",
+                "port_filter": "",
+                "regex": "Ult\\\\.Vol\\\\.:\\s*([-+]?\\d+(?:\\.\\d+)?)ml",
+                "value_mode": "group1"
+            }
+        ]
+    }
 }
