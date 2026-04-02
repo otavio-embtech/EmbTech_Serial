@@ -1,5 +1,5 @@
 from PyQt6.QtCore import QCoreApplication, QPoint, QTime, QTimer, Qt
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QWidget
 
 
 class OledTimerDisplay(QWidget):
@@ -71,20 +71,43 @@ class OledTimerDisplay(QWidget):
         self.timer.timeout.connect(self._atualizar_display)
         self.timer.start(1000)
 
+        self.anchor_widget = None
         self.hide()
 
-    def _reposicionar_no_topo(self):
-        desktop = QCoreApplication.instance().primaryScreen().availableGeometry()
-        x = (desktop.width() - self.width()) // 2
-        y = 9
+    def _get_target_geometry(self, anchor_widget=None):
+        widget = anchor_widget or self.anchor_widget
+        try:
+            if widget is not None:
+                if hasattr(widget, "windowHandle") and widget.windowHandle() is not None:
+                    screen = widget.windowHandle().screen()
+                    if screen is not None:
+                        return screen.availableGeometry()
+                if hasattr(widget, "screen"):
+                    screen = widget.screen()
+                    if screen is not None:
+                        return screen.availableGeometry()
+                center = widget.mapToGlobal(widget.rect().center())
+                screen = QApplication.screenAt(center)
+                if screen is not None:
+                    return screen.availableGeometry()
+        except Exception:
+            pass
+        return QCoreApplication.instance().primaryScreen().availableGeometry()
+
+    def _reposicionar_no_topo(self, anchor_widget=None):
+        if anchor_widget is not None:
+            self.anchor_widget = anchor_widget
+        desktop = self._get_target_geometry(anchor_widget)
+        x = desktop.left() + (desktop.width() - self.width()) // 2
+        y = desktop.top() + 9
         self.move(QPoint(x, y))
 
-    def iniciar_teste(self, numero_serie=""):
+    def iniciar_teste(self, numero_serie="", anchor_widget=None):
         self.tempo_inicial = QTime.currentTime()
         self.tempo_teste = 0
         self.placa_em_teste = (numero_serie or "").strip()
         self.congelado = False
-        self._reposicionar_no_topo()
+        self._reposicionar_no_topo(anchor_widget)
         self._forcar_display()
         self.show()
 
@@ -134,5 +157,6 @@ class OledTimerDisplay(QWidget):
     def minimizar_display(self):
         self.hide()
 
-    def restaurar_display(self):
+    def restaurar_display(self, anchor_widget=None):
+        self._reposicionar_no_topo(anchor_widget)
         self.show()
