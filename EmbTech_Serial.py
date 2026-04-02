@@ -1204,6 +1204,43 @@ class PlacaTesterApp(QMainWindow):
             self._taskbar_icon_forced = True
             _force_windows_taskbar_icon(self, self._app_icon_path)
 
+    def _should_ignore_global_test_shortcut(self):
+        if QApplication.activeModalWidget() is not None:
+            return True
+
+        focus_widget = QApplication.focusWidget()
+        editable_types = (
+            QLineEdit,
+            QTextEdit,
+            QComboBox,
+            QSpinBox,
+            QDoubleSpinBox,
+        )
+        return isinstance(focus_widget, editable_types)
+
+    def _try_trigger_start_test_shortcut(self):
+        if self._should_ignore_global_test_shortcut():
+            return False
+        if not hasattr(self, "start_test_button"):
+            return False
+        if not self.start_test_button.isEnabled() or not self.start_test_button.isVisible():
+            return False
+        self.start_test_button.click()
+        return True
+
+    def keyPressEvent(self, event):
+        try:
+            key = event.key()
+        except Exception:
+            key = None
+
+        if key in (Qt.Key.Key_I, Qt.Key.Key_Space):
+            if self._try_trigger_start_test_shortcut():
+                event.accept()
+                return
+
+        super().keyPressEvent(event)
+
     def _run_deferred_startup(self):
         if self._deferred_startup_completed:
             return
@@ -1530,32 +1567,32 @@ class PlacaTesterApp(QMainWindow):
                     color: #ffffff;
                 }
                 /* Estilos específicos para os botões de conexão de porta */
-                #connect_serial_command_button[text="Abrir Porta Principal"] {
+                #connect_serial_command_button[text="Conectar Porta Principal"] {
                     background-color: #28a745;
                     border-color: #218838;
                 }
-                #connect_serial_command_button[text="Abrir Porta Principal"]:hover {
+                #connect_serial_command_button[text="Conectar Porta Principal"]:hover {
                     background-color: #218838;
                 }
-                #connect_serial_command_button[text="Fechar Porta Principal"] {
+                #connect_serial_command_button[text="Desconectar Porta Principal"] {
                     background-color: #dc3545;
                     border-color: #c82333;
                 }
-                #connect_serial_command_button[text="Fechar Porta Principal"]:hover {
+                #connect_serial_command_button[text="Desconectar Porta Principal"]:hover {
                     background-color: #c82333;
                 }
-                #connect_modbus_button[text="Abrir Porta Modbus"] {
+                #connect_modbus_button[text="Conectar Porta Modbus"] {
                     background-color: #28a745;
                     border-color: #218838;
                 }
-                #connect_modbus_button[text="Abrir Porta Modbus"]:hover {
+                #connect_modbus_button[text="Conectar Porta Modbus"]:hover {
                     background-color: #218838;
                 }
-                #connect_modbus_button[text="Fechar Porta Modbus"] {
+                #connect_modbus_button[text="Desconectar Porta Modbus"] {
                     background-color: #dc3545;
                     border-color: #c82333;
                 }
-                #connect_modbus_button[text="Fechar Porta Modbus"]:hover {
+                #connect_modbus_button[text="Desconectar Porta Modbus"]:hover {
                     background-color: #c82333;
                 }
                 /* Estilos para a QTableWidget Modbus */
@@ -2037,7 +2074,7 @@ class PlacaTesterApp(QMainWindow):
         serial_layout.addWidget(self.serial_details_widget)
         self.serial_details_widget.setVisible(True) # Começa expandido
 
-        self.connect_serial_command_button = QPushButton("Abrir Porta Principal")
+        self.connect_serial_command_button = QPushButton("Conectar Porta Principal")
         self.connect_serial_command_button.setObjectName("connect_serial_command_button") # Adiciona objectName para QSS
         self.connect_serial_command_button.clicked.connect(lambda: self._toggle_serial_connection("serial_command"))
         serial_layout.addWidget(self.connect_serial_command_button)
@@ -2113,7 +2150,7 @@ class PlacaTesterApp(QMainWindow):
         modbus_serial_layout.addWidget(self.modbus_details_widget)
         self.modbus_details_widget.setVisible(False) # Começa recolhido
 
-        self.connect_modbus_button = QPushButton("Abrir Porta Modbus")
+        self.connect_modbus_button = QPushButton("Conectar Porta Modbus")
         self.connect_modbus_button.setObjectName("connect_modbus_button") # Adiciona objectName para QSS
         self.connect_modbus_button.clicked.connect(lambda: self._toggle_serial_connection("modbus"))
         self.modbus_serial_group.setLayout(modbus_serial_layout)
@@ -4514,7 +4551,7 @@ class PlacaTesterApp(QMainWindow):
             # UI
             self.modbus_port_combobox.setCurrentText(target)
             self.modbus_port_combobox.setEnabled(False)
-            self.connect_modbus_button.setText("Fechar Porta Modbus")
+            self.connect_modbus_button.setText("Desconectar Porta Modbus")
 
             # Thread leitora
             new_reader_thread = SerialReaderThread(self.modbus_ser, "Modbus", is_modbus_port=True)
@@ -4779,8 +4816,8 @@ class PlacaTesterApp(QMainWindow):
             connect_button = self.connect_serial_command_button
             reader_thread_attr = 'serial_command_reader_thread'
             ser_attr = 'serial_command_ser'
-            button_text_open = "Fechar Porta Principal"
-            button_text_close = "Abrir Porta Principal"
+            button_text_open = "Desconectar Porta Principal"
+            button_text_close = "Conectar Porta Principal"
             log_prefix = "Principal"
             is_modbus = False
             
@@ -4805,8 +4842,8 @@ class PlacaTesterApp(QMainWindow):
             connect_button = self.connect_modbus_button
             reader_thread_attr = 'modbus_serial_reader_thread'
             ser_attr = 'modbus_ser'
-            button_text_open = "Fechar Porta Modbus"
-            button_text_close = "Abrir Porta Modbus"
+            button_text_open = "Desconectar Porta Modbus"
+            button_text_close = "Conectar Porta Modbus"
             log_prefix = "Modbus"
             is_modbus = True
             
@@ -5133,9 +5170,9 @@ class PlacaTesterApp(QMainWindow):
         port_combobox.setEnabled(True)
         if port_type == "serial_command":
             # Atualiza texto do botão para refletir estado de porta fechada
-            connect_button.setText("Abrir Porta Principal")
+            connect_button.setText("Conectar Porta Principal")
         else:
-            connect_button.setText("Abrir Porta Modbus")
+            connect_button.setText("Conectar Porta Modbus")
 
         any_connected = (
             (self.serial_command_ser is not None and self.serial_command_ser.is_open) or
@@ -6089,7 +6126,7 @@ class PlacaTesterApp(QMainWindow):
         uses_runtime_profiles = bool(self._required_test_profile_keys())
         oled = self._ensure_oled_display()
         if oled is not None:
-            oled._reposicionar_no_topo()
+            oled._reposicionar_no_topo(self)
             oled.show()
         # Verifica se as portas necessárias estão conectadas
         if not uses_runtime_profiles and not serial_command_connected:
@@ -6155,7 +6192,7 @@ class PlacaTesterApp(QMainWindow):
         self.test_start_time = datetime.now()
         oled = self._ensure_oled_display()
         if oled is not None:
-            oled.iniciar_teste(self.current_serial_number)
+            oled.iniciar_teste(self.current_serial_number, self)
         self._start_test_execution() # Inicia a execução do primeiro passo
 
     def _start_test_execution(self):
