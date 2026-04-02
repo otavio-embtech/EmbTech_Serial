@@ -11,8 +11,71 @@ from configuracoes_widget import ConfiguracoesWidget
 import threading
 import tempfile
 import shlex
-from relatorio_eficiencia_widget import RelatorioEficienciaWidget
-from oled_timer_display import OledTimerDisplay
+import importlib
+
+DATALOGGER_MODULE_AVAILABLE = None
+DataLoggerConfigDialog = None
+
+
+def build_default_datalogger_settings():
+    return {
+        "file_path": "",
+        "sheet_name": "DataLogger",
+        "header_row": 1,
+        "enabled_types": ["recebido", "enviado"],
+        "capture_mode": "event",
+        "snapshot_window_ms": 300,
+        "preview_history_size": 80,
+        "preset_name": "Generico",
+        "base_columns": {"timestamp": "A", "type": "B", "port": "C", "latency_ms": "D", "message": "E"},
+        "rules": [],
+    }
+
+
+class DataLoggerManager:
+    def __init__(self, settings=None):
+        self.settings = build_default_datalogger_settings()
+        if isinstance(settings, dict):
+            self.settings.update(settings)
+
+    def update_settings(self, settings):
+        if isinstance(settings, dict):
+            self.settings.update(settings)
+
+    def ensure_workbook(self):
+        path = str(self.settings.get("file_path", "")).strip()
+        if not path:
+            raise ValueError("Nenhum arquivo configurado para o DataLogger.")
+        folder = os.path.dirname(path)
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        if not os.path.exists(path):
+            wb = Workbook()
+            ws = wb.active
+            ws.title = str(self.settings.get("sheet_name", "DataLogger")).strip() or "DataLogger"
+            ws.append(["DataHora", "Tipo", "Porta", "Latencia_ms", "Mensagem"])
+            wb.save(path)
+
+    def append_event(self, event):
+        path = str(self.settings.get("file_path", "")).strip()
+        if not path:
+            return []
+        self.ensure_workbook()
+        wb = load_workbook(path)
+        ws = wb.active
+        ts = event.get("timestamp", datetime.now())
+        ws.append([
+            ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            event.get("msg_type", ""),
+            event.get("source_port", ""),
+            event.get("latency_ms", ""),
+            event.get("message", ""),
+        ])
+        wb.save(path)
+        return []
+
+    def get_preview_state(self):
+        return {}
 from collections import deque
 from datetime import datetime
 import platform
@@ -25,7 +88,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QCheckBox, QDialog, QDialogButtonBox,
     QTabWidget, QFormLayout, QSpinBox, QDoubleSpinBox, QListWidget, QListWidgetItem,
     QToolButton, QMenu, QRadioButton, QSizePolicy, QTableWidget, QTableWidgetItem,
-    QHeaderView, QScrollArea
+    QHeaderView, QScrollArea, QSplitter
 )
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt, QEvent, QPoint, QRegularExpression
 from PyQt6.QtGui import QCursor, QAction, QIcon, QBrush, QColor, QPixmap, QRegularExpressionValidator, QPalette
@@ -34,9 +97,200 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import requests
 import winsound
+import ctypes
 
 # Importa a nova biblioteca Modbus (assumindo que está no mesmo diretório ou acessível no PATH)
 import modbus_lib
+
+ICON_FILENAME = "hub.icoa"
+ICON_FALLBACK = "hub.ico"
+ICON_SERIAL = "icone.ico"
+
+
+def resolve_app_icon_path():
+    base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    candidates = [
+        os.path.join(base_dir, "assets", ICON_SERIAL),
+        os.path.join(base_dir, "assets", ICON_FILENAME),
+        os.path.join(base_dir, "assets", ICON_FALLBACK),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            icon = QIcon(path)
+            if not icon.isNull():
+                return path
+    return ""
+
+
+def load_app_icon():
+    icon_path = resolve_app_icon_path()
+    if icon_path:
+        return QIcon(icon_path)
+    return QIcon()
+
+
+class EnterReleaseGuardMixin:
+    """
+    Bloqueia Enter/Return ate que a tecla seja solta apos a abertura do popup.
+    Evita confirmacoes acidentais quando o operador mantem Enter pressionado.
+    """
+    ENTER_GUARD_MESSAGE = "Solte o Enter e pressione novamente para confirmar."
+
+    def _init_enter_release_guard(self, warning_message=None):
+        self._enter_guard_warning_message = warning_message or self.ENTER_GUARD_MESSAGE
+        self._enter_guard_label = None
+        self._enter_guard_released_since_show = False
+        self._enter_guard_filter_installed = False
+        self._enter_guard_activation_button = None
+
+    def create_enter_guard_label(self):
+        label = QLabel(self._enter_guard_warning_message)
+        label.setWordWrap(True)
+        label.setStyleSheet("color: #B22222; font-weight: bold;")
+        label.setVisible(False)
+        self._enter_guard_label = label
+        return label
+
+    def set_enter_guard_activation_button(self, button):
+        self._enter_guard_activation_button = button
+
+    def _reset_enter_release_guard(self):
+        self._enter_guard_released_since_show = True
+        if self._enter_guard_label is not None:
+            self._enter_guard_label.setVisible(False)
+
+    def _install_enter_release_guard(self):
+        app = QApplication.instance()
+        if app is not None and not self._enter_guard_filter_installed:
+            app.installEventFilter(self)
+            self._enter_guard_filter_installed = True
+
+    def _remove_enter_release_guard(self):
+        app = QApplication.instance()
+        if app is not None and self._enter_guard_filter_installed:
+            app.removeEventFilter(self)
+        self._enter_guard_filter_installed = False
+
+    def _enter_guard_targets_object(self, obj):
+        if obj is self:
+            return True
+        if isinstance(obj, QWidget):
+            try:
+                return self.isAncestorOf(obj)
+            except Exception:
+                return False
+        return False
+
+    def _show_enter_guard_warning(self):
+        if self._enter_guard_label is not None:
+            self._enter_guard_label.setVisible(True)
+
+    def _activate_enter_guard_button(self):
+        focus_widget = QApplication.focusWidget()
+        if isinstance(focus_widget, QPushButton) and self._enter_guard_targets_object(focus_widget):
+            if focus_widget.isEnabled() and focus_widget.isVisible():
+                focus_widget.click()
+                return True
+
+        button = self._enter_guard_activation_button
+        if isinstance(button, QPushButton) and button.isEnabled() and button.isVisible():
+            button.click()
+            return True
+
+        for child in self.findChildren(QPushButton):
+            if child.isDefault() and child.isEnabled() and child.isVisible():
+                child.click()
+                return True
+
+        if not isinstance(self, QMessageBox):
+            try:
+                self.accept()
+                return True
+            except Exception:
+                pass
+
+        return False
+
+    def _handle_enter_guard_event(self, obj, event):
+        if not self.isVisible() or not self._enter_guard_targets_object(obj):
+            return False
+
+        if event.type() not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            return False
+
+        try:
+            key = event.key()
+        except Exception:
+            return False
+
+        if key not in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            return False
+
+        if event.type() == QEvent.Type.KeyRelease:
+            self._enter_guard_released_since_show = True
+            if self._enter_guard_label is not None:
+                self._enter_guard_label.setVisible(False)
+            return False
+
+        if (not self._enter_guard_released_since_show) or event.isAutoRepeat():
+            self._show_enter_guard_warning()
+            return True
+
+        self._enter_guard_released_since_show = False
+        return self._activate_enter_guard_button()
+
+    def showEvent(self, event):
+        self._reset_enter_release_guard()
+        self._install_enter_release_guard()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        self._remove_enter_release_guard()
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        self._remove_enter_release_guard()
+        super().closeEvent(event)
+
+    def eventFilter(self, obj, event):
+        if self._handle_enter_guard_event(obj, event):
+            return True
+        return super().eventFilter(obj, event)
+
+
+class EnterReleaseProtectedDialog(EnterReleaseGuardMixin, QDialog):
+    def __init__(self, parent=None, warning_message=None):
+        super().__init__(parent)
+        self._init_enter_release_guard(warning_message)
+
+
+class EnterReleaseProtectedMessageBox(EnterReleaseGuardMixin, QMessageBox):
+    def __init__(self, parent=None, warning_message=None):
+        super().__init__(parent)
+        self._init_enter_release_guard(warning_message)
+
+
+def _force_windows_taskbar_icon(window, icon_path):
+    if platform.system() != "Windows" or not icon_path:
+        return
+    try:
+        user32 = ctypes.windll.user32
+        image_icon = 1
+        lr_loadfromfile = 0x10
+        wm_seticon = 0x80
+        icon_small = 0
+        icon_big = 1
+        hwnd = int(window.winId())
+        hicon_small = user32.LoadImageW(None, icon_path, image_icon, 16, 16, lr_loadfromfile)
+        hicon_big = user32.LoadImageW(None, icon_path, image_icon, 32, 32, lr_loadfromfile)
+        if hicon_small:
+            user32.SendMessageW(hwnd, wm_seticon, icon_small, hicon_small)
+        if hicon_big:
+            user32.SendMessageW(hwnd, wm_seticon, icon_big, hicon_big)
+        window._taskbar_hicon_small = hicon_small
+        window._taskbar_hicon_big = hicon_big
+    except Exception:
+        pass
 
 
 class _FolderHandler(FileSystemEventHandler):
@@ -180,6 +434,7 @@ class SerialReaderThread(QThread):
         self._clear_response_buffer_flag = False # Flag para limpar o buffer antes de um novo passo de teste
         self.port_name = port_name # Nome da porta para identificação em logs
         self.is_modbus_port = is_modbus_port # Flag para indicar se é uma porta Modbus
+        self.read_mode = "modbus" if is_modbus_port else "serial"
 
     def run(self):
         """
@@ -191,7 +446,7 @@ class SerialReaderThread(QThread):
                     self._response_buffer.clear()
                     self._clear_response_buffer_flag = False
 
-                if self.is_modbus_port:
+                if self.read_mode == "modbus":
                     # Para Modbus, leia bytes diretamente
                     # A leitura de Modbus deve ser mais controlada (ex: por um timeout de inter-caracteres)
                     # Aqui, faremos uma leitura simples com timeout da porta
@@ -225,23 +480,45 @@ class SerialReaderThread(QThread):
         Para a execução da thread de forma segura.
         """
         self._running = False
-        self.wait() # Espera a thread terminar sua execução
+        try:
+            cancel_read = getattr(self.ser, "cancel_read", None)
+            if callable(cancel_read):
+                cancel_read()
+        except Exception:
+            pass
+        try:
+            cancel_write = getattr(self.ser, "cancel_write", None)
+            if callable(cancel_write):
+                cancel_write()
+        except Exception:
+            pass
+        self.wait(2000) # Espera a thread terminar sua execução
 
     def get_buffered_response(self):
         """
         Retorna o conteúdo atual do buffer de respostas e o limpa.
         Retorna bytes para Modbus e string para serial principal.
         """
-        if self.is_modbus_port:
-            # Para Modbus, concatena os bytes
-            response_bytes = b''.join(self._response_buffer)
+        if not self._response_buffer:
+            return b"" if self.read_mode == "modbus" else ""
+
+        has_bytes = any(isinstance(x, (bytes, bytearray)) for x in self._response_buffer)
+        if has_bytes:
+            response_bytes = b"".join(
+                x if isinstance(x, (bytes, bytearray)) else str(x).encode("utf-8", errors="ignore")
+                for x in self._response_buffer
+            )
             self._response_buffer.clear()
             return response_bytes
-        else:
-            # Para serial principal, concatena as strings
-            response_str = "\n".join(self._response_buffer)
-            self._response_buffer.clear()
-            return response_str
+
+        response_str = "\n".join(self._response_buffer)
+        self._response_buffer.clear()
+        return response_str
+
+    def set_read_mode(self, mode):
+        if mode not in ("serial", "modbus"):
+            return
+        self.read_mode = mode
     
     def clear_response_buffer_for_next_step(self):
         """
@@ -257,9 +534,9 @@ class TimerConfigDialog(QDialog):
     """
     def __init__(self, current_interval_seconds, parent=None):
         super().__init__(parent)
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-        icon_path = os.path.join(base_path, "assets", "icone.ico")
-        self.setWindowIcon(QIcon(icon_path))
+        app_icon = load_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
 
         self.setWindowTitle("Configurar Intervalo do Timer")
         self.setFixedSize(250, 100)
@@ -303,9 +580,9 @@ class TestIdDialog(QDialog):
     """
     def __init__(self, last_pr_number="", last_serial_number="", parent=None):
         super().__init__(parent)
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-        icon_path = os.path.join(base_path, "assets", "icone.ico")
-        self.setWindowIcon(QIcon(icon_path))
+        app_icon = load_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
 
         self.setWindowTitle("Iniciar Teste - Informações da Placa")
         self.setFixedSize(350, 150)
@@ -345,16 +622,16 @@ class TestIdDialog(QDialog):
 
 
 
-class RetestStepDialog(QDialog):
+class RetestStepDialog(EnterReleaseProtectedDialog):
     """
     Diálogo exibido quando um passo de teste falha, permitindo ao usuário re-testar
     o passo ou finalizar o teste.
     """
     def __init__(self, step_name, error_description, parent=None):
         super().__init__(parent)
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-        icon_path = os.path.join(base_path, "assets", "icone.ico")
-        self.setWindowIcon(QIcon(icon_path))
+        app_icon = load_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
 
         self.setWindowTitle(f"Re-testar Passo: {step_name}")
         self.setFixedSize(400, 200)
@@ -376,6 +653,7 @@ class RetestStepDialog(QDialog):
 
         self.retest_button = QPushButton("Re-testar Passo")
         self.retest_button.clicked.connect(self.accept)
+        self.set_enter_guard_activation_button(self.retest_button)
         button_layout.addWidget(self.retest_button)
 
         self.finish_test_button = QPushButton("Finalizar Teste")
@@ -383,6 +661,7 @@ class RetestStepDialog(QDialog):
         button_layout.addWidget(self.finish_test_button)
 
         layout.addLayout(button_layout)
+        layout.addWidget(self.create_enter_guard_label())
 class TestPortConfigDialog(QDialog):
     """
     Diálogo para configurar as portas seriais específicas para um arquivo de teste.
@@ -390,9 +669,9 @@ class TestPortConfigDialog(QDialog):
     """
     def __init__(self, current_serial_settings, current_modbus_settings, parent=None):
         super().__init__(parent)
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-        icon_path = os.path.join(base_path, "assets", "icone.ico")
-        self.setWindowIcon(QIcon(icon_path))
+        app_icon = load_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
 
         self.setWindowTitle("Configurar Portas para este Teste")
         self.setFixedSize(450, 400)
@@ -498,15 +777,180 @@ class TestPortConfigDialog(QDialog):
         return serial_settings, modbus_settings
 
 
-class ManualInstructionDialog(QDialog):
+class TestPortsManagerDialog(QDialog):
+    SLOT_COUNT = 10
+
+    def __init__(self, current_profiles=None, parent=None):
+        super().__init__(parent)
+        app_icon = load_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
+
+        self.setWindowTitle("Configurar Portas do Teste")
+        self.setFixedSize(460, 460)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+
+        self.available_ports = [port.device for port in serial.tools.list_ports.comports()]
+        self.profiles = self._normalize_profiles(current_profiles)
+        self.current_slot_key = "porta_1"
+
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        top_row = QHBoxLayout()
+        self.slot_combo = QComboBox()
+        self.slot_combo.addItems([f"Porta {i}" for i in range(1, self.SLOT_COUNT + 1)])
+        self.slot_combo.currentIndexChanged.connect(self._on_slot_changed)
+        top_row.addWidget(self.slot_combo)
+
+        self.enabled_checkbox = QCheckBox("Habilita")
+        top_row.addWidget(self.enabled_checkbox)
+        top_row.addStretch(1)
+        form_layout.addRow("Perfil:", top_row)
+
+        self.display_name_input = QLineEdit()
+        self.display_name_input.setPlaceholderText("Defina o nome da porta exemplo: (Serial1)")
+        form_layout.addRow("Nome:", self.display_name_input)
+
+        self.system_port_combo = QComboBox()
+        self.system_port_combo.addItem("Usar da Página Inicial", "")
+        for port_name in self.available_ports:
+            self.system_port_combo.addItem(port_name, port_name)
+        form_layout.addRow("Porta COM:", self.system_port_combo)
+
+        self.role_combo = QComboBox()
+        self.role_combo.addItems(["Serial", "Modbus"])
+        form_layout.addRow("Tipo:", self.role_combo)
+
+        self.baud_combo = QComboBox()
+        self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"])
+        form_layout.addRow("BaudRate", self.baud_combo)
+
+        self.data_bits_combo = QComboBox()
+        self.data_bits_combo.addItems(["5", "6", "7", "8"])
+        form_layout.addRow("DataBit", self.data_bits_combo)
+
+        self.stop_bits_combo = QComboBox()
+        self.stop_bits_combo.addItems(["OneStop", "OnePointFiveStop", "TwoStop"])
+        form_layout.addRow("StopBit", self.stop_bits_combo)
+
+        self.flow_control_combo = QComboBox()
+        self.flow_control_combo.addItems(["NoFlowControl", "RTS/CTS", "XON/XOFF"])
+        form_layout.addRow("FlowControl", self.flow_control_combo)
+
+        self.parity_combo = QComboBox()
+        self.parity_combo.addItems(["NoParity", "OddParity", "EvenParity", "MarkParity", "SpaceParity"])
+        form_layout.addRow("Parity", self.parity_combo)
+
+        modem_row = QHBoxLayout()
+        self.dtr_checkbox = QCheckBox("DTR")
+        self.rts_checkbox = QCheckBox("RTS")
+        modem_row.addWidget(self.dtr_checkbox)
+        modem_row.addWidget(self.rts_checkbox)
+        modem_row.addStretch(1)
+        form_layout.addRow("Linhas:", modem_row)
+
+        layout.addLayout(form_layout)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        self._load_profile_to_widgets(self.current_slot_key)
+
+    @staticmethod
+    def _slot_key_from_index(index):
+        return f"porta_{index + 1}"
+
+    @staticmethod
+    def _default_profile(slot_key):
+        slot_number = int(slot_key.split("_")[-1])
+        return {
+            "key": slot_key,
+            "slot_label": f"Porta {slot_number}",
+            "enabled": False,
+            "display_name": f"Porta {slot_number}",
+            "system_port": "",
+            "role": "serial",
+            "baud": "115200",
+            "data_bits": "8",
+            "stop_bits": "OneStop",
+            "handshake": "NoFlowControl",
+            "parity": "NoParity",
+            "dtr": False,
+            "rts": False,
+        }
+
+    def _normalize_profiles(self, current_profiles):
+        profiles_map = {}
+        if isinstance(current_profiles, list):
+            for profile in current_profiles:
+                if isinstance(profile, dict) and profile.get("key"):
+                    profiles_map[profile["key"]] = {**self._default_profile(profile["key"]), **profile}
+        elif isinstance(current_profiles, dict):
+            for key, profile in current_profiles.items():
+                if isinstance(profile, dict):
+                    profiles_map[key] = {**self._default_profile(key), **profile}
+
+        normalized = {}
+        for index in range(self.SLOT_COUNT):
+            slot_key = self._slot_key_from_index(index)
+            normalized[slot_key] = profiles_map.get(slot_key, self._default_profile(slot_key))
+        return normalized
+
+    def _save_widgets_to_current_profile(self):
+        profile = self.profiles[self.current_slot_key]
+        profile["enabled"] = self.enabled_checkbox.isChecked()
+        profile["display_name"] = self.display_name_input.text().strip() or profile["slot_label"]
+        profile["system_port"] = (self.system_port_combo.currentData() or "").strip()
+        profile["role"] = "modbus" if self.role_combo.currentText() == "Modbus" else "serial"
+        profile["baud"] = self.baud_combo.currentText()
+        profile["data_bits"] = self.data_bits_combo.currentText()
+        profile["stop_bits"] = self.stop_bits_combo.currentText()
+        profile["handshake"] = self.flow_control_combo.currentText()
+        profile["parity"] = self.parity_combo.currentText()
+        profile["dtr"] = self.dtr_checkbox.isChecked()
+        profile["rts"] = self.rts_checkbox.isChecked()
+
+    def _load_profile_to_widgets(self, slot_key):
+        profile = self.profiles[slot_key]
+        self.current_slot_key = slot_key
+        self.enabled_checkbox.setChecked(bool(profile.get("enabled", False)))
+        self.display_name_input.setText(profile.get("display_name", ""))
+        system_port = profile.get("system_port", "")
+        combo_index = self.system_port_combo.findData(system_port)
+        self.system_port_combo.setCurrentIndex(max(0, combo_index))
+        self.role_combo.setCurrentText("Modbus" if profile.get("role") == "modbus" else "Serial")
+        self.baud_combo.setCurrentText(profile.get("baud", "115200"))
+        self.data_bits_combo.setCurrentText(profile.get("data_bits", "8"))
+        self.stop_bits_combo.setCurrentText(profile.get("stop_bits", "OneStop"))
+        self.flow_control_combo.setCurrentText(profile.get("handshake", "NoFlowControl"))
+        self.parity_combo.setCurrentText(profile.get("parity", "NoParity"))
+        self.dtr_checkbox.setChecked(bool(profile.get("dtr", False)))
+        self.rts_checkbox.setChecked(bool(profile.get("rts", False)))
+
+    def _on_slot_changed(self, index):
+        self._save_widgets_to_current_profile()
+        self._load_profile_to_widgets(self._slot_key_from_index(index))
+
+    def accept(self):
+        self._save_widgets_to_current_profile()
+        super().accept()
+
+    def get_profiles(self):
+        return [self.profiles[self._slot_key_from_index(index)] for index in range(self.SLOT_COUNT)]
+
+
+class ManualInstructionDialog(EnterReleaseProtectedDialog):
     """
     Diálogo para exibir instruções manuais ao usuário, opcionalmente com uma imagem.
     """
     def __init__(self, step_number, total_steps, step_name, instruction_message, image_path, parent=None):
         super().__init__(parent)
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-        icon_path = os.path.join(base_path, "assets", "icone.ico")
-        self.setWindowIcon(QIcon(icon_path))
+        app_icon = load_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
 
         self.setWindowTitle(f"Instrução Manual - Passo {step_number}/{total_steps}: {step_name}")
         self.setMinimumSize(400, 300)
@@ -545,7 +989,9 @@ class ManualInstructionDialog(QDialog):
         self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
+        self.set_enter_guard_activation_button(self.button_box.button(QDialogButtonBox.StandardButton.Ok))
         main_layout.addWidget(self.button_box)
+        main_layout.addWidget(self.create_enter_guard_label())
 
         # Única flag e único closeEvent para detectar fechamento pelo X
         self.closed_via_titlebar = False
@@ -556,9 +1002,10 @@ class ManualInstructionDialog(QDialog):
 
 # Novo widget para exibir um passo de teste com um checkbox para o modo fast
 class TestStepListItemWidget(QWidget):
-    def __init__(self, step_data, parent=None):
+    def __init__(self, step_data, step_number=None, parent=None):
         super().__init__(parent)
         self.step_data = step_data
+        self.step_number = step_number
         self.init_ui()
 
     def init_ui(self):
@@ -586,7 +1033,8 @@ class TestStepListItemWidget(QWidget):
             port_label = "Principal" if self.step_data.get("port_type", "serial") == "serial" else "Modbus"
             step_type_label = f"[Comando Auto - Porta {port_label}]"
 
-        self.name_label = QLabel(f"{step_type_label} {self.step_data.get('nome', 'Sem Nome')}")
+        prefix = f"{int(self.step_number):02d}. " if self.step_number is not None else ""
+        self.name_label = QLabel(f"{prefix}{step_type_label} {self.step_data.get('nome', 'Sem Nome')}")
         layout.addWidget(self.name_label)
         layout.addStretch(1) # Empurra os elementos para a esquerda
 
@@ -607,15 +1055,18 @@ class PlacaTesterApp(QMainWindow):
     Oferece terminal, envio automático/manual de comandos e um criador de testes.
     """
     VERSION = "3.9.6" # Versão atual do aplicativo (incrementada para tema)
+    AUTO_STEP_MAX_RETRIES = 2
 
     CONFIG_FILE_TEST_OPERATOR = 'test_operator_config.ini' # Use um nome de arquivo diferente para esta configuração
     CONFIG_SECTION_TEST_OPERATOR = 'TestOperator'
 
     def __init__(self):
         super().__init__()
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-        icon_path = os.path.join(base_path, "assets", "icone.ico")
-        self.setWindowIcon(QIcon(icon_path))
+        self._taskbar_icon_forced = False
+        self._app_icon_path = resolve_app_icon_path()
+        app_icon = load_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
         self.config = configparser.ConfigParser() # Inicialize o configparser aqui
 
         # Inicializa um atributo para guardar o último operador de teste
@@ -667,10 +1118,16 @@ class PlacaTesterApp(QMainWindow):
 
         self.test_serial_command_settings = {} # Configurações da porta principal para o teste
         self.test_modbus_settings = {} # Configurações da porta Modbus para o teste
+        self.test_port_profiles = []
+        self.test_runtime_ports = {}
+        self.test_runtime_readers = {}
+        self.test_runtime_port_owners = {}
         # Estados de auto-reconexão Modbus
         self.modbus_reconnect_timer = None
         self.modbus_reconnect_attempts_remaining = 0
         self.modbus_target_port = ""
+        self._shared_port_mode = None
+        self._manual_port_close_until = {}
 
         # Listas para gerenciar os campos de envio automático/manual
         self.send_command_inputs = []
@@ -698,6 +1155,15 @@ class PlacaTesterApp(QMainWindow):
         self.datalogger_enabled = False
         self.datalogger_path = ""
         self._datalogger_last_ts = None
+        self.datalogger_settings = build_default_datalogger_settings()
+        self.datalogger_manager = DataLoggerManager(self.datalogger_settings)
+        self.datalogger_tab_index = -1
+        self.datalogger_config_panel = None
+        self.datalogger_tab_widget = None
+        self.relatorio_tab_index = -1
+        self.relatorio_widget = None
+        self.oled = None
+        self._deferred_startup_completed = False
 
         # Variáveis para o Modo Fast
         self.fast_mode_active = False # Estado atual do modo fast
@@ -724,15 +1190,39 @@ class PlacaTesterApp(QMainWindow):
             pass
         self.radio_comando_auto.setChecked(True) # Define o rádio botão de comando automático como padrão
 
-        self._list_serial_ports() # Lista as portas seriais disponíveis
-        self._load_settings() # Carrega as configurações salvas
-        self._update_port_config_visibility(True) # Inicia expandido
         self.setWindowTitle("EmbTech Serial")
         self.show()
+        _force_windows_taskbar_icon(self, self._app_icon_path)
+        QTimer.singleShot(0, self._run_deferred_startup)
 
-        from oled_timer_display import OledTimerDisplay
-        self.oled = OledTimerDisplay()
-        self.oled.hide()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._taskbar_icon_forced:
+            self._taskbar_icon_forced = True
+            _force_windows_taskbar_icon(self, self._app_icon_path)
+
+    def _run_deferred_startup(self):
+        if self._deferred_startup_completed:
+            return
+        self._deferred_startup_completed = True
+        try:
+            self._list_serial_ports()
+        except Exception:
+            pass
+        try:
+            self._load_settings()
+        except Exception:
+            pass
+        try:
+            self._update_port_config_visibility(True)
+        except Exception:
+            pass
+        try:
+            self._ensure_folder_monitor_running()
+            self._folder_check_timer.start()
+        except Exception:
+            pass
 
     def _load_last_test_operator(self):
         self.config.read(self.CONFIG_FILE_TEST_OPERATOR)
@@ -1408,6 +1898,9 @@ class PlacaTesterApp(QMainWindow):
         self.datalogger_cb.setChecked(False)
         self.datalogger_cb.toggled.connect(self._toggle_datalogger)
         header_row.addWidget(self.datalogger_cb)
+        self.datalogger_config_button = QPushButton("Configurar")
+        self.datalogger_config_button.clicked.connect(self._open_datalogger_config_dialog)
+        header_row.addWidget(self.datalogger_config_button)
         header_row.addStretch(1)
         left_panel.addLayout(header_row)
         left_panel.addWidget(self.log_text_edit, 6)
@@ -1730,16 +2223,11 @@ class PlacaTesterApp(QMainWindow):
         self._folder_check_timer = QTimer(self)
         self._folder_check_timer.setInterval(5000)
         self._folder_check_timer.timeout.connect(self._ensure_folder_monitor_running)
-        self._ensure_folder_monitor_running()
-        self._folder_check_timer.start()
         # Lista para manter referências de diálogos de alerta
         self._active_alert_dialogs = []
 
-        from relatorio_eficiencia_widget import RelatorioEficienciaWidget
-
-        self.relatorio_widget = RelatorioEficienciaWidget(parent=self)
-        self.tab_widget.addTab(self.relatorio_widget, "Relatórios")
-        self.tab_widget.setTabVisible(self.tab_widget.indexOf(self.relatorio_widget), False)
+        self.relatorio_widget = None
+        self.relatorio_tab_index = -1
 
     def _custom_resize_event(self, event):
         """
@@ -1755,12 +2243,33 @@ class PlacaTesterApp(QMainWindow):
         Gerencia a visibilidade do rótulo de versão e da área de clique oculta
         com base na aba selecionada.
         """
-        aba_oculta_versao = self.tab_widget.tabText(index) in ["Criador de Teste", "Configurações", "Relatórios"]
+        aba_oculta_versao = self.tab_widget.tabText(index) in ["Criador de Teste", "Configurações", "Relatórios", "DataLogger"]
         self.version_label.setVisible(not aba_oculta_versao)
         self.hidden_click_area.setVisible(not aba_oculta_versao)
 
+        if self.tab_widget.tabText(index) == "Relatórios" and self.relatorio_widget is not None:
+            try:
+                self.relatorio_widget.set_logs_dir(self.configuracoes_tab.get_log_path())
+            except Exception:
+                pass
+
         if self.tab_widget.tabText(index) == "Criador de Teste":
+            self._update_test_creator_splitter_sizes()
             self._update_move_buttons_state() # Atualiza o estado dos botões de mover passos
+
+    def _update_test_creator_splitter_sizes(self):
+        splitter = getattr(self, "test_creator_splitter", None)
+        if splitter is None:
+            return
+        total_width = splitter.width()
+        if total_width <= 0:
+            return
+        left_width = max(260, int(total_width * 0.30))
+        right_width = max(420, total_width - left_width)
+        current_sizes = splitter.sizes()
+        if (not getattr(self, "_test_creator_splitter_initialized", False)) or not any(current_sizes):
+            splitter.setSizes([left_width, right_width])
+            self._test_creator_splitter_initialized = True
 
     def _handle_hidden_button_click(self):
         """
@@ -1772,7 +2281,9 @@ class PlacaTesterApp(QMainWindow):
             if self.test_creator_tab_index != -1:
                 self.tab_widget.setTabVisible(self.test_creator_tab_index, True)
                 self.tab_widget.setTabVisible(self.tab_widget.indexOf(self.configuracoes_tab), True)
-                self.tab_widget.setTabVisible(self.tab_widget.indexOf(self.relatorio_widget), True)
+                self._ensure_relatorio_tab_loaded()
+                if self.relatorio_tab_index != -1:
+                    self.tab_widget.setTabVisible(self.relatorio_tab_index, True)
 
     def _ensure_folder_monitor_running(self):
         documents_path = self.configuracoes_tab.get_log_path()
@@ -1957,11 +2468,44 @@ class PlacaTesterApp(QMainWindow):
         Inicializa os componentes da interface do usuário para a aba "Criador de Teste".
         """
         self.test_creator_tab = QWidget()
-        test_creator_layout = QVBoxLayout(self.test_creator_tab)
-        
+        test_creator_root_layout = QVBoxLayout(self.test_creator_tab)
+        test_creator_root_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.test_creator_splitter = QSplitter(Qt.Orientation.Horizontal, self.test_creator_tab)
+        self.test_creator_splitter.setChildrenCollapsible(False)
+        test_creator_root_layout.addWidget(self.test_creator_splitter)
+
+        creator_left_panel = QWidget()
+        creator_left_layout = QVBoxLayout(creator_left_panel)
+        creator_left_layout.setContentsMargins(8, 8, 4, 8)
+        creator_left_layout.setSpacing(8)
+
+        creator_right_panel = QWidget()
+        test_creator_layout = QVBoxLayout(creator_right_panel)
+        test_creator_layout.setContentsMargins(4, 8, 8, 8)
+        test_creator_layout.setSpacing(8)
+
+        creator_terminal_panel = QWidget()
+        creator_terminal_layout = QVBoxLayout(creator_terminal_panel)
+        creator_terminal_layout.setContentsMargins(0, 0, 0, 0)
+        creator_terminal_layout.setSpacing(6)
+        creator_terminal_layout.addWidget(QLabel("Terminal de Apoio"))
+
+        self.test_creator_log_text_edit = QTextEdit()
+        self.test_creator_log_text_edit.setObjectName("log_text_edit")
+        self.test_creator_log_text_edit.setReadOnly(True)
+        self.test_creator_log_text_edit.setStyleSheet("font-size: 14px; font-family: 'Consolas', 'Courier New', monospace; border: 1px solid #d0d0d0; border-radius: 4px;")
+        self.test_creator_log_text_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.test_creator_log_text_edit.customContextMenuRequested.connect(self._show_test_creator_log_context_menu)
+        self.test_creator_log_text_edit.setHtml(self.log_text_edit.toHtml())
+        creator_terminal_layout.addWidget(self.test_creator_log_text_edit)
+
         # Grupo para configurações de comunicação do teste
         port_config_group = QGroupBox("Configurações de Comunicação para o Teste")
         port_config_layout = QVBoxLayout(port_config_group)
+        port_config_layout.setSpacing(4)
+        port_config_layout.setContentsMargins(9, 18, 9, 9)
+        port_config_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         self.configure_test_ports_button = QPushButton("Configurar Portas do Teste")
         self.configure_test_ports_button.clicked.connect(self._open_test_port_config_dialog)
@@ -1969,10 +2513,15 @@ class PlacaTesterApp(QMainWindow):
 
         self.test_serial_settings_label = QLabel("Porta Principal: Não configurada")
         self.test_modbus_settings_label = QLabel("Porta Modbus: Não configurada")
+        for label in (self.test_serial_settings_label, self.test_modbus_settings_label):
+            label.setWordWrap(False)
+            label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            label.setMaximumHeight(22)
+            label.setStyleSheet("font-size: 12px;")
         port_config_layout.addWidget(self.test_serial_settings_label)
         port_config_layout.addWidget(self.test_modbus_settings_label)
 
-        test_creator_layout.addWidget(port_config_group)
+        test_creator_layout.addWidget(port_config_group, 0)
 
         # Configurações do Modo Fast (agora como um campo direto, sem QGroupBox)
         fast_mode_layout = QHBoxLayout()
@@ -2017,8 +2566,6 @@ class PlacaTesterApp(QMainWindow):
         self.command_validation_layout = QFormLayout(self.command_validation_group)
 
         self.step_port_type_combo = QComboBox()
-        self.step_port_type_combo.addItems(["Porta Principal (Dados e Comandos)", "Porta Modbus (Texto e Validação)"]) # Removido Modbus daqui
-        self.step_port_type_combo.setCurrentText("Porta Principal (Dados e Comandos)")
         self.command_validation_layout.addRow("Usar Porta:", self.step_port_type_combo)
 
         self.step_command_input = QLineEdit()
@@ -2175,6 +2722,12 @@ class PlacaTesterApp(QMainWindow):
         self.modbus_command_group = QWidget()
         modbus_command_layout = QVBoxLayout(self.modbus_command_group)
 
+        modbus_port_layout = QHBoxLayout()
+        modbus_port_layout.addWidget(QLabel("Porta do Passo:"))
+        self.modbus_step_port_combo = QComboBox()
+        modbus_port_layout.addWidget(self.modbus_step_port_combo)
+        modbus_command_layout.addLayout(modbus_port_layout)
+
         self.modbus_table_widget = QTableWidget()
         self.modbus_table_widget.setColumnCount(9) # ID Escravo, Função, Endereço Reg., Qtd., Tipo, Valor Escrita, Valor Esperado, Limite Mín., Limite Máx.
         self.modbus_table_widget.setHorizontalHeaderLabels([
@@ -2215,7 +2768,7 @@ class PlacaTesterApp(QMainWindow):
 
         edit_step_layout.addRow(action_buttons_layout)
 
-        test_creator_layout.addWidget(edit_step_group)
+        test_creator_layout.addWidget(edit_step_group, 1)
 
         # Botões para mover passos na lista
         move_step_buttons_layout = QHBoxLayout()
@@ -2229,14 +2782,17 @@ class PlacaTesterApp(QMainWindow):
         self.move_step_down_button.setEnabled(False)
         move_step_buttons_layout.addWidget(self.move_step_down_button)
         
-        test_creator_layout.addLayout(move_step_buttons_layout)
+        bottom_panel = QWidget()
+        bottom_layout = QVBoxLayout(bottom_panel)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(6)
 
         # Lista de passos de teste atuais (usará TestStepListItemWidget)
         self.test_steps_list = QListWidget()
         self.test_steps_list.itemClicked.connect(self._load_step_for_editing) # Carrega o passo selecionado para edição
         self.test_steps_list.itemSelectionChanged.connect(self._update_move_buttons_state) # Atualiza o estado dos botões de mover
-        test_creator_layout.addWidget(QLabel("Passos do Teste Atuais (Marque para Modo Fast):"))
-        test_creator_layout.addWidget(self.test_steps_list)
+        bottom_layout.addWidget(QLabel("Passos do Teste Atuais (Marque para Modo Fast):"))
+        bottom_layout.addWidget(self.test_steps_list)
 
         # Botões para gerenciar o arquivo de teste
         test_file_buttons_layout = QHBoxLayout()
@@ -2254,13 +2810,24 @@ class PlacaTesterApp(QMainWindow):
         self.clear_test_button.setEnabled(False)
         test_file_buttons_layout.addWidget(self.clear_test_button)
 
-        test_creator_layout.addLayout(test_file_buttons_layout)
+        bottom_layout.addLayout(test_file_buttons_layout)
+
+        creator_left_layout.addWidget(creator_terminal_panel, 2)
+        creator_left_layout.addLayout(move_step_buttons_layout)
+        creator_left_layout.addWidget(bottom_panel, 3)
+
+        self.test_creator_splitter.addWidget(creator_left_panel)
+        self.test_creator_splitter.addWidget(creator_right_panel)
+        self.test_creator_splitter.setStretchFactor(0, 3)
+        self.test_creator_splitter.setStretchFactor(1, 7)
+        self._test_creator_splitter_initialized = False
 
         # Adiciona a aba "Criador de Teste" e a oculta por padrão
         self.test_creator_tab_index = self.tab_widget.addTab(self.test_creator_tab, "Criador de Teste")
         self.tab_widget.setTabVisible(self.test_creator_tab_index, False) 
 
         # Configurações iniciais dos campos de validação e lista de passos
+        self._refresh_test_port_selectors()
         self._toggle_validation_params_fields(self.step_validation_type_combo.currentIndex())
         self._update_test_steps_list()
         self._update_test_port_settings_display()
@@ -2421,7 +2988,16 @@ class PlacaTesterApp(QMainWindow):
         # Novo tipo 'Gravar NS' não requer campos adicionais visíveis
         if is_write_serial:
             # Força uso da porta principal e pré-preenche o comando modelo na UI para referência
-            self.step_port_type_combo.setCurrentText("Porta Principal (Dados e Comandos)")
+            serial_index = self.step_port_type_combo.findData("legacy_serial")
+            if serial_index == -1:
+                for idx in range(self.step_port_type_combo.count()):
+                    profile_key = self.step_port_type_combo.itemData(idx)
+                    profile = self._get_test_port_profile(profile_key)
+                    if profile and profile.get("role") == "serial":
+                        serial_index = idx
+                        break
+            if serial_index != -1:
+                self.step_port_type_combo.setCurrentIndex(serial_index)
             self.step_command_input.setText("SET_NS=XXXXX/XXX;")
 
         # Limpa os campos de outros tipos de passo quando a seleção muda
@@ -2621,7 +3197,7 @@ class PlacaTesterApp(QMainWindow):
 
         for i, step_data in enumerate(self.current_test_steps):
             item = QListWidgetItem(self.test_steps_list)
-            widget = TestStepListItemWidget(step_data)
+            widget = TestStepListItemWidget(step_data, step_number=i + 1)
             item.setSizeHint(widget.sizeHint())
             self.test_steps_list.addItem(item)
             self.test_steps_list.setItemWidget(item, widget)
@@ -2661,12 +3237,14 @@ class PlacaTesterApp(QMainWindow):
         step_type = step.get("tipo_passo", "comando_validacao")
         if step_type == "comando_validacao":
             self.radio_comando_auto.setChecked(True)
-            # Define a porta conforme o passo salvo
-            port_type = step.get("port_type", "serial")
-            if port_type == "modbus":
-                self.step_port_type_combo.setCurrentText("Porta Modbus (Texto e Validação)")
+            step_port_key = step.get("test_port_key")
+            if step_port_key and self.step_port_type_combo.findData(step_port_key) != -1:
+                self.step_port_type_combo.setCurrentIndex(self.step_port_type_combo.findData(step_port_key))
             else:
-                self.step_port_type_combo.setCurrentText("Porta Principal (Dados e Comandos)")
+                port_type = step.get("port_type", "serial")
+                legacy_key = "legacy_modbus" if port_type == "modbus" else "legacy_serial"
+                if self.step_port_type_combo.findData(legacy_key) != -1:
+                    self.step_port_type_combo.setCurrentIndex(self.step_port_type_combo.findData(legacy_key))
             self.step_command_input.setText(step.get("comando_enviar", ""))
             # Carrega campos RTC
             self.rtc_feature_cb.setChecked(step.get("use_rtc", False))
@@ -2728,6 +3306,9 @@ class PlacaTesterApp(QMainWindow):
         
         elif step_type == "modbus_comando": # Carrega o novo tipo de passo Modbus
             self.radio_modbus_comando.setChecked(True)
+            step_port_key = step.get("test_port_key")
+            if step_port_key and self.modbus_step_port_combo.findData(step_port_key) != -1:
+                self.modbus_step_port_combo.setCurrentIndex(self.modbus_step_port_combo.findData(step_port_key))
             modbus_params_list = step.get("modbus_params", [])
             self.modbus_table_widget.setRowCount(len(modbus_params_list))
             for r, params in enumerate(modbus_params_list):
@@ -2905,12 +3486,12 @@ class PlacaTesterApp(QMainWindow):
 
         if self.radio_comando_auto.isChecked():
             # Coleta dados para um passo de comando/validação automática
-            port_type_display = self.step_port_type_combo.currentText()
-            port_type_map = {
-                "Porta Principal (Dados e Comandos)": "serial",
-    "Porta Modbus (Texto e Validação)": "modbus",
-            }
-            port_type = port_type_map.get(port_type_display, "serial")
+            selected_port_key = self.step_port_type_combo.currentData()
+            selected_profile = self._get_test_port_profile(selected_port_key) if selected_port_key else None
+            if selected_profile:
+                port_type = selected_profile.get("role", "serial")
+            else:
+                port_type = "modbus" if selected_port_key == "legacy_modbus" else "serial"
             
             command = self.step_command_input.text()
             expect_response = self.step_expect_response_cb.isChecked()
@@ -2938,6 +3519,7 @@ class PlacaTesterApp(QMainWindow):
             # Salva o passo de comando/validação automática corretamente
             step["tipo_passo"] = "comando_validacao"
             step["port_type"] = port_type
+            step["test_port_key"] = selected_port_key if selected_profile else ""
             step["comando_enviar"] = command
             step["esperar_resposta"] = expect_response
             step["timeout_ms"] = timeout if expect_response else 0
@@ -3017,6 +3599,7 @@ class PlacaTesterApp(QMainWindow):
                     QMessageBox.warning(self, "Configuração Modbus Vazia", "Adicione pelo menos uma linha à tabela Modbus.")
                     return
                 step["tipo_passo"] = "modbus_comando"
+                step["test_port_key"] = self.modbus_step_port_combo.currentData() or ""
                 step["modbus_params"] = modbus_params
             except ValueError as e:
                 QMessageBox.warning(self, "Erro de Configuração Modbus", str(e))
@@ -3060,12 +3643,12 @@ class PlacaTesterApp(QMainWindow):
 
         if self.radio_comando_auto.isChecked():
             # Coleta dados para um passo de comando/validação automática
-            port_type_display = self.step_port_type_combo.currentText()
-            port_type_map = {
-                "Porta Principal (Dados e Comandos)": "serial",
-    "Porta Modbus (Texto e Validação)": "modbus",
-            }
-            port_type = port_type_map.get(port_type_display, "serial")
+            selected_port_key = self.step_port_type_combo.currentData()
+            selected_profile = self._get_test_port_profile(selected_port_key) if selected_port_key else None
+            if selected_profile:
+                port_type = selected_profile.get("role", "serial")
+            else:
+                port_type = "modbus" if selected_port_key == "legacy_modbus" else "serial"
 
             command = self.step_command_input.text()
             expect_response = self.step_expect_response_cb.isChecked()
@@ -3091,6 +3674,7 @@ class PlacaTesterApp(QMainWindow):
 
             updated_step["tipo_passo"] = "comando_validacao"
             updated_step["port_type"] = port_type
+            updated_step["test_port_key"] = selected_port_key if selected_profile else ""
             updated_step["comando_enviar"] = command
             updated_step["esperar_resposta"] = expect_response
             updated_step["timeout_ms"] = timeout if expect_response else 0
@@ -3164,6 +3748,7 @@ class PlacaTesterApp(QMainWindow):
                     QMessageBox.warning(self, "Configuração Modbus Vazia", "Adicione pelo menos uma linha à tabela Modbus.")
                     return
                 updated_step["tipo_passo"] = "modbus_comando"
+                updated_step["test_port_key"] = self.modbus_step_port_combo.currentData() or ""
                 updated_step["modbus_params"] = modbus_params
             except ValueError as e:
                 QMessageBox.warning(self, "Erro de Configuração Modbus", str(e))
@@ -3220,8 +3805,10 @@ class PlacaTesterApp(QMainWindow):
             self.current_test_steps = []
             self.test_serial_command_settings = {}
             self.test_modbus_settings = {}
+            self.test_port_profiles = []
             self.fast_mode_secret_code = "" # Limpa o código secreto
             self.fast_mode_code_input.clear() # Limpa o campo na UI
+            self._refresh_test_port_selectors()
             self._update_test_steps_list()
             self._clear_step_input_fields()
             self.editing_step_index = -1
@@ -3233,7 +3820,8 @@ class PlacaTesterApp(QMainWindow):
 
     def _clear_command_validation_fields(self):
         """Limpa todos os campos relacionados a comandos e validação."""
-        self.step_port_type_combo.setCurrentText("Porta Principal (Dados e Comandos)")
+        if self.step_port_type_combo.count() > 0:
+            self.step_port_type_combo.setCurrentIndex(0)
         self.step_command_input.clear()
         self.step_expect_response_cb.setChecked(False)
         self.step_timeout_input.setValue(1000)
@@ -3254,6 +3842,8 @@ class PlacaTesterApp(QMainWindow):
 
     def _clear_modbus_command_fields(self):
         """Limpa e reseta a tabela Modbus para o estado padrão."""
+        if hasattr(self, "modbus_step_port_combo") and self.modbus_step_port_combo.count() > 0:
+            self.modbus_step_port_combo.setCurrentIndex(0)
         self.modbus_table_widget.clearContents()
         self.modbus_table_widget.setRowCount(1)
         self._init_modbus_table_row(0)
@@ -3307,16 +3897,349 @@ class PlacaTesterApp(QMainWindow):
             self.move_step_up_button.setEnabled(current_row > 0)
             self.move_step_down_button.setEnabled(current_row < num_steps - 1)
 
+    def _default_test_port_profiles(self):
+        return [TestPortsManagerDialog._default_profile(f"porta_{index}") for index in range(1, 11)]
+
+    def _normalize_test_port_profiles(self, profiles):
+        dialog_cls = TestPortsManagerDialog
+        defaults = {
+            f"porta_{index}": dialog_cls._default_profile(f"porta_{index}")
+            for index in range(1, dialog_cls.SLOT_COUNT + 1)
+        }
+        normalized = []
+        source_items = profiles if isinstance(profiles, list) else []
+        for index in range(1, dialog_cls.SLOT_COUNT + 1):
+            key = f"porta_{index}"
+            merged = defaults[key].copy()
+            for item in source_items:
+                if isinstance(item, dict) and item.get("key") == key:
+                    merged.update(item)
+                    break
+            normalized.append(merged)
+        return normalized
+
+    def _get_test_port_profile(self, profile_key):
+        for profile in self.test_port_profiles:
+            if profile.get("key") == profile_key:
+                return profile
+        return None
+
+    def _get_enabled_test_port_profiles(self, role=None):
+        enabled = []
+        for profile in self.test_port_profiles:
+            if not profile.get("enabled"):
+                continue
+            if role and profile.get("role") != role:
+                continue
+            enabled.append(profile)
+        return enabled
+
+    def _sync_legacy_test_port_settings_from_profiles(self):
+        serial_profiles = self._get_enabled_test_port_profiles("serial")
+        modbus_profiles = self._get_enabled_test_port_profiles("modbus")
+
+        if serial_profiles:
+            serial_profile = serial_profiles[0]
+            self.test_serial_command_settings = {
+                "baud": serial_profile.get("baud", "115200"),
+                "data_bits": serial_profile.get("data_bits", "8"),
+                "parity": self._parity_from_profile_to_ui(serial_profile.get("parity", "NoParity")),
+                "handshake": self._handshake_from_profile_to_ui(serial_profile.get("handshake", "NoFlowControl")),
+                "mode": serial_profile.get("mode", "Free"),
+            }
+        else:
+            self.test_serial_command_settings = {}
+
+        if modbus_profiles:
+            modbus_profile = modbus_profiles[0]
+            self.test_modbus_settings = {
+                "baud": modbus_profile.get("baud", "9600"),
+                "data_bits": modbus_profile.get("data_bits", "8"),
+                "parity": self._parity_from_profile_to_ui(modbus_profile.get("parity", "NoParity")),
+                "handshake": self._handshake_from_profile_to_ui(modbus_profile.get("handshake", "NoFlowControl")),
+                "mode": modbus_profile.get("mode", "Free"),
+            }
+        else:
+            self.test_modbus_settings = {}
+
+    def _build_profiles_from_legacy_settings(self):
+        profiles = []
+        if self.test_serial_command_settings:
+            profiles.append({
+                "key": "porta_1",
+                "slot_label": "Porta 1",
+                "enabled": True,
+                "display_name": "Principal",
+                "system_port": "",
+                "role": "serial",
+                "baud": self.test_serial_command_settings.get("baud", "115200"),
+                "data_bits": self.test_serial_command_settings.get("data_bits", "8"),
+                "stop_bits": "OneStop",
+                "handshake": self._handshake_from_ui_to_profile(self.test_serial_command_settings.get("handshake", "Nenhum")),
+                "parity": self._parity_from_ui_to_profile(self.test_serial_command_settings.get("parity", "Nenhuma")),
+                "mode": self.test_serial_command_settings.get("mode", "Free"),
+                "dtr": False,
+                "rts": False,
+            })
+        if self.test_modbus_settings:
+            profiles.append({
+                "key": "porta_2",
+                "slot_label": "Porta 2",
+                "enabled": True,
+                "display_name": "Modbus",
+                "system_port": "",
+                "role": "modbus",
+                "baud": self.test_modbus_settings.get("baud", "9600"),
+                "data_bits": self.test_modbus_settings.get("data_bits", "8"),
+                "stop_bits": "OneStop",
+                "handshake": self._handshake_from_ui_to_profile(self.test_modbus_settings.get("handshake", "Nenhum")),
+                "parity": self._parity_from_ui_to_profile(self.test_modbus_settings.get("parity", "Nenhuma")),
+                "mode": self.test_modbus_settings.get("mode", "Free"),
+                "dtr": False,
+                "rts": False,
+            })
+        return self._normalize_test_port_profiles(profiles)
+
+    def _parity_from_profile_to_ui(self, parity):
+        return {
+            "NoParity": "Nenhuma",
+            "OddParity": "Ímpar",
+            "EvenParity": "Par",
+            "MarkParity": "Marca",
+            "SpaceParity": "Espaço",
+        }.get(parity, "Nenhuma")
+
+    def _parity_from_ui_to_profile(self, parity):
+        return {
+            "Nenhuma": "NoParity",
+            "Ímpar": "OddParity",
+            "Par": "EvenParity",
+            "Marca": "MarkParity",
+            "Espaço": "SpaceParity",
+        }.get(parity, "NoParity")
+
+    def _handshake_from_profile_to_ui(self, handshake):
+        return {
+            "NoFlowControl": "Nenhum",
+            "RTS/CTS": "RTS/CTS",
+            "XON/XOFF": "XON/XOFF",
+        }.get(handshake, "Nenhum")
+
+    def _handshake_from_ui_to_profile(self, handshake):
+        return {
+            "Nenhum": "NoFlowControl",
+            "RTS/CTS": "RTS/CTS",
+            "XON/XOFF": "XON/XOFF",
+        }.get(handshake, "NoFlowControl")
+
+    def _refresh_test_port_selectors(self, selected_key=None, modbus_selected_key=None):
+        current_selected = selected_key if selected_key is not None else getattr(self.step_port_type_combo, "currentData", lambda: None)()
+        current_modbus_selected = modbus_selected_key if modbus_selected_key is not None else getattr(self.modbus_step_port_combo, "currentData", lambda: None)()
+
+        enabled_profiles = self._get_enabled_test_port_profiles()
+        enabled_modbus_profiles = self._get_enabled_test_port_profiles("modbus")
+
+        self.step_port_type_combo.clear()
+        if enabled_profiles:
+            for profile in enabled_profiles:
+                port_hint = profile.get('system_port') or "COM da tela inicial"
+                label = f"{profile.get('display_name', profile.get('slot_label', profile.get('key')))} ({port_hint})"
+                self.step_port_type_combo.addItem(label, profile.get("key"))
+            target_index = max(0, self.step_port_type_combo.findData(current_selected))
+            self.step_port_type_combo.setCurrentIndex(target_index)
+        else:
+            self.step_port_type_combo.addItem("Porta Principal (Dados e Comandos)", "legacy_serial")
+            self.step_port_type_combo.addItem("Porta Modbus (Texto e Validação)", "legacy_modbus")
+            if current_selected == "legacy_modbus":
+                self.step_port_type_combo.setCurrentIndex(1)
+            else:
+                self.step_port_type_combo.setCurrentIndex(0)
+
+        self.modbus_step_port_combo.clear()
+        if enabled_modbus_profiles:
+            for profile in enabled_modbus_profiles:
+                port_hint = profile.get('system_port') or "COM da tela inicial"
+                label = f"{profile.get('display_name', profile.get('slot_label', profile.get('key')))} ({port_hint})"
+                self.modbus_step_port_combo.addItem(label, profile.get("key"))
+            target_modbus_index = max(0, self.modbus_step_port_combo.findData(current_modbus_selected))
+            self.modbus_step_port_combo.setCurrentIndex(target_modbus_index)
+        elif enabled_profiles:
+            for profile in enabled_profiles:
+                port_hint = profile.get('system_port') or "COM da tela inicial"
+                label = f"{profile.get('display_name', profile.get('slot_label', profile.get('key')))} ({port_hint})"
+                self.modbus_step_port_combo.addItem(label, profile.get("key"))
+            target_modbus_index = max(0, self.modbus_step_port_combo.findData(current_modbus_selected))
+            self.modbus_step_port_combo.setCurrentIndex(target_modbus_index)
+        else:
+            self.modbus_step_port_combo.addItem("Porta Modbus", "legacy_modbus")
+
+    def _required_test_profile_keys(self):
+        required = []
+        for step in self.current_test_steps:
+            profile_key = step.get("test_port_key")
+            if step.get("tipo_passo") in ("comando_validacao", "modbus_comando") and profile_key:
+                if profile_key not in required:
+                    required.append(profile_key)
+        return required
+
+    def _map_stop_bits_profile_to_pyserial(self, stop_bits):
+        return {
+            "OneStop": serial.STOPBITS_ONE,
+            "OnePointFiveStop": serial.STOPBITS_ONE_POINT_FIVE,
+            "TwoStop": serial.STOPBITS_TWO,
+        }.get(stop_bits, serial.STOPBITS_ONE)
+
+    def _map_parity_profile_to_pyserial(self, parity):
+        return {
+            "NoParity": serial.PARITY_NONE,
+            "OddParity": serial.PARITY_ODD,
+            "EvenParity": serial.PARITY_EVEN,
+            "MarkParity": serial.PARITY_MARK,
+            "SpaceParity": serial.PARITY_SPACE,
+        }.get(parity, serial.PARITY_NONE)
+
+    def _close_test_runtime_ports(self):
+        for profile_key, reader in list(self.test_runtime_readers.items()):
+            try:
+                if self.test_runtime_port_owners.get(profile_key):
+                    reader.stop()
+            except Exception:
+                pass
+        self.test_runtime_readers = {}
+
+        for profile_key, ser_instance in list(self.test_runtime_ports.items()):
+            try:
+                if self.test_runtime_port_owners.get(profile_key) and ser_instance and getattr(ser_instance, "is_open", False):
+                    ser_instance.close()
+            except Exception:
+                pass
+        self.test_runtime_ports = {}
+        self.test_runtime_port_owners = {}
+
+    def _open_required_test_runtime_ports(self):
+        required_keys = self._required_test_profile_keys()
+        if not required_keys:
+            self._close_test_runtime_ports()
+            return True, ""
+
+        self._close_test_runtime_ports()
+        used_system_ports = set()
+
+        for profile_key in required_keys:
+            profile = self._get_test_port_profile(profile_key)
+            if not profile:
+                return False, f"Perfil de porta '{profile_key}' não encontrado."
+            if not profile.get("enabled"):
+                return False, f"A porta lógica '{profile.get('display_name', profile_key)}' não está habilitada."
+            system_port = (profile.get("system_port") or "").strip()
+
+            alias_ser = None
+            alias_reader = None
+            if not system_port:
+                if profile.get("role") == "modbus":
+                    alias_ser = self.modbus_ser
+                    alias_reader = self.modbus_serial_reader_thread
+                    system_port = self._get_serial_port_name(self.modbus_ser)
+                    if alias_ser is None or not getattr(alias_ser, "is_open", False):
+                        return False, f"A porta lógica '{profile.get('display_name', profile_key)}' depende da porta Modbus da tela inicial, que não está aberta."
+                else:
+                    alias_ser = self.serial_command_ser
+                    alias_reader = self.serial_command_reader_thread
+                    system_port = self._get_serial_port_name(self.serial_command_ser)
+                    if alias_ser is None or not getattr(alias_ser, "is_open", False):
+                        return False, f"A porta lógica '{profile.get('display_name', profile_key)}' depende da porta Principal da tela inicial, que não está aberta."
+
+            if system_port in used_system_ports and alias_ser is None:
+                return False, f"A COM '{system_port}' foi configurada em mais de uma porta lógica usada no teste."
+            used_system_ports.add(system_port)
+
+            if alias_ser is not None:
+                if alias_reader is None:
+                    return False, f"A porta lógica '{profile.get('display_name', profile_key)}' depende de uma porta da tela inicial sem thread de leitura ativa."
+                self.test_runtime_ports[profile_key] = alias_ser
+                self.test_runtime_readers[profile_key] = alias_reader
+                self.test_runtime_port_owners[profile_key] = False
+                continue
+
+            if profile.get("role") == "serial" and self._ports_match(system_port, self._get_serial_port_name(self.serial_command_ser)):
+                if self.serial_command_reader_thread is None:
+                    return False, f"A porta lógica '{profile.get('display_name', profile_key)}' usa a Principal da tela inicial, mas a leitura não está ativa."
+                self.test_runtime_ports[profile_key] = self.serial_command_ser
+                self.test_runtime_readers[profile_key] = self.serial_command_reader_thread
+                self.test_runtime_port_owners[profile_key] = False
+                continue
+
+            if profile.get("role") == "modbus" and self._ports_match(system_port, self._get_serial_port_name(self.modbus_ser)):
+                if self.modbus_serial_reader_thread is None:
+                    return False, f"A porta lógica '{profile.get('display_name', profile_key)}' usa a Modbus da tela inicial, mas a leitura não está ativa."
+                self.test_runtime_ports[profile_key] = self.modbus_ser
+                self.test_runtime_readers[profile_key] = self.modbus_serial_reader_thread
+                self.test_runtime_port_owners[profile_key] = False
+                continue
+
+            try:
+                ser_instance = self._open_serial_port_with_retry(
+                    port=system_port,
+                    baud=int(profile.get("baud", "115200")),
+                    data_bits=int(profile.get("data_bits", "8")),
+                    parity=self._map_parity_profile_to_pyserial(profile.get("parity", "NoParity")),
+                    xonxoff=profile.get("handshake") == "XON/XOFF",
+                    rtscts=profile.get("handshake") == "RTS/CTS",
+                    dtr_state=bool(profile.get("dtr", False)),
+                    rts_state=bool(profile.get("rts", False)),
+                    attempts=8 if profile.get("role") == "modbus" else 5,
+                    retry_delay_s=0.6 if profile.get("role") == "modbus" else 0.35,
+                    apply_modem_lines=bool(profile.get("dtr", False) or profile.get("rts", False)),
+                    reset_buffers=True,
+                    refresh_ports_between_attempts=True,
+                    stop_bits=self._map_stop_bits_profile_to_pyserial(profile.get("stop_bits", "OneStop")),
+                )
+                reader = SerialReaderThread(
+                    ser_instance,
+                    profile.get("display_name", profile_key),
+                    is_modbus_port=(profile.get("role") == "modbus"),
+                )
+                reader.data_received.connect(self._display_received_data)
+                reader.connection_lost.connect(self._handle_connection_lost)
+                reader.start()
+
+                self.test_runtime_ports[profile_key] = ser_instance
+                self.test_runtime_readers[profile_key] = reader
+                self.test_runtime_port_owners[profile_key] = True
+            except Exception as e:
+                self._close_test_runtime_ports()
+                return False, f"Falha ao abrir '{profile.get('display_name', profile_key)}' em {system_port}: {e}"
+
+        return True, ""
+
+    def _resolve_step_target_port(self, step, require_modbus=False):
+        profile_key = step.get("test_port_key")
+        if profile_key:
+            profile = self._get_test_port_profile(profile_key)
+            if profile:
+                return (
+                    self.test_runtime_ports.get(profile_key),
+                    self.test_runtime_readers.get(profile_key),
+                    profile.get("display_name", profile_key),
+                    profile.get("role", "serial"),
+                )
+        if require_modbus:
+            return self.modbus_ser, self.modbus_serial_reader_thread, "Modbus", "modbus"
+        port_type = step.get("port_type", "serial")
+        if port_type == "modbus":
+            return self.modbus_ser, self.modbus_serial_reader_thread, "Modbus", "modbus"
+        return self.serial_command_ser, self.serial_command_reader_thread, "Principal", "serial"
+
     def _open_test_port_config_dialog(self):
         """
         Abre o diálogo para configurar as portas seriais específicas para o teste.
         """
-        dialog = TestPortConfigDialog(self.test_serial_command_settings, self.test_modbus_settings, self)
+        dialog = TestPortsManagerDialog(self.test_port_profiles, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            serial_settings, modbus_settings = dialog.get_settings()
-            self.test_serial_command_settings = serial_settings
-            self.test_modbus_settings = modbus_settings
+            self.test_port_profiles = self._normalize_test_port_profiles(dialog.get_profiles())
+            self._sync_legacy_test_port_settings_from_profiles()
             self._update_test_port_settings_display() # Atualiza os rótulos de exibição das configurações
+            self._refresh_test_port_selectors()
             QMessageBox.information(self, "Configurações Salvas", "Configurações de porta para este teste salvas. Lembre-se de salvar o arquivo de teste.")
         else:
             self.log_message("Configuração de portas do teste cancelada.", "informacao")
@@ -3325,21 +4248,31 @@ class PlacaTesterApp(QMainWindow):
         """
         Atualiza os rótulos que exibem as configurações das portas para o teste.
         """
-        if self.test_serial_command_settings:
-            s = self.test_serial_command_settings
-            self.test_serial_settings_label.setText(
-                f"Porta Principal: Baud: {s.get('baud')}, Data: {s.get('data_bits')}, Parity: {s.get('parity')}, Flow: {s.get('handshake')}, Modo: {s.get('mode')}"
-            )
-        else:
-            self.test_serial_settings_label.setText("Porta Principal: Não configurada")
+        enabled_profiles = self._get_enabled_test_port_profiles()
+        if enabled_profiles:
+            first_line = enabled_profiles[:2]
+            second_line = enabled_profiles[2:4]
 
-        if self.test_modbus_settings:
-            m = self.test_modbus_settings
-            self.test_modbus_settings_label.setText(
-                f"Porta Modbus: Baud: {m.get('baud')}, Data: {m.get('data_bits')}, Parity: {m.get('parity')}, Flow: {m.get('handshake')}, Modo: {m.get('mode')}"
+            def _fmt(profile):
+                return (
+                    f"{profile.get('display_name', profile.get('slot_label'))}: "
+                    f"{profile.get('system_port') or 'COM da tela inicial'} | "
+                    f"{profile.get('role', 'serial').upper()} | "
+                    f"{profile.get('baud')} bps"
+                )
+
+            self.test_serial_settings_label.setText(
+                "Portas do Teste: " + " ; ".join(_fmt(profile) for profile in first_line)
             )
+            if second_line:
+                self.test_modbus_settings_label.setText(
+                    "Mais Portas: " + " ; ".join(_fmt(profile) for profile in second_line)
+                )
+            else:
+                self.test_modbus_settings_label.setText("Mais Portas: Nenhuma")
         else:
-            self.test_modbus_settings_label.setText("Porta Modbus: Não configurada")
+            self.test_serial_settings_label.setText("Portas do Teste: Nenhuma configurada")
+            self.test_modbus_settings_label.setText("Mais Portas: Nenhuma")
 
     def _save_test_file(self):
         """
@@ -3376,13 +4309,14 @@ class PlacaTesterApp(QMainWindow):
             serializable_steps.append(temp_step)
 
         test_data_to_save = {
-            "version": "1.4", # Versão do formato do arquivo de teste (atualizada para Modbus como passo exclusivo)
+            "version": "1.5", # Versão do formato do arquivo de teste (portas lógicas múltiplas)
             "modbus_required": modbus_needed_for_save,
             "fast_mode_code": self.fast_mode_secret_code, # Salva o código secreto
             "steps": serializable_steps,
             "port_configurations": {
                 "serial_command": self.test_serial_command_settings,
-                "modbus": self.test_modbus_settings
+                "modbus": self.test_modbus_settings,
+                "profiles": self.test_port_profiles,
             }
         }
 
@@ -3451,7 +4385,7 @@ class PlacaTesterApp(QMainWindow):
         self.modbus_port_combobox.setEnabled(self.modbus_serial_group.isVisible())
 
     # --- Auto-reconexão Modbus ---
-    def _handle_connection_lost(self, port_name: str):
+    def _legacy_handle_modbus_connection_lost(self, port_name: str):
         try:
             self.log_message(f"Conexão perdida na porta {port_name}.", "erro")
             if port_name == "Modbus":
@@ -3478,13 +4412,13 @@ class PlacaTesterApp(QMainWindow):
                 if self.modbus_reconnect_timer is None:
                     self.modbus_reconnect_timer = QTimer(self)
                     self.modbus_reconnect_timer.setSingleShot(True)
-                    self.modbus_reconnect_timer.timeout.connect(self._try_reconnect_modbus)
+                    self.modbus_reconnect_timer.timeout.connect(self._legacy_try_reconnect_modbus)
                 self.log_message(f"Tentando reconectar Modbus em '{self.modbus_target_port}' (10 tentativas, a cada 2s)...", "sistema")
                 self.modbus_reconnect_timer.start(2000)
         except Exception as e:
             self.log_message(f"Erro no handler de conexão perdida: {e}", "erro")
 
-    def _try_reconnect_modbus(self):
+    def _legacy_try_reconnect_modbus(self):
         # Se não há mais tentativas, aborta
         if self.modbus_reconnect_attempts_remaining <= 0:
             self.log_message("Falha ao reconectar Modbus após 10 tentativas.", "erro")
@@ -3532,7 +4466,7 @@ class PlacaTesterApp(QMainWindow):
         }
         baud = int(port_settings.get("baud", "9600"))
         data_bits = int(port_settings.get("data_bits", "8"))
-        parity = parity_map.get(port_settings.get("parity", "Nenhuma"), serial.PARITY_NONE)
+        parity = self._get_pyserial_parity(port_settings.get("parity", "Nenhuma"))
         flow = port_settings.get("handshake", "Nenhum")
         xonxoff = (flow == "XON/XOFF")
         rtscts = (flow == "RTS/CTS")
@@ -3548,12 +4482,13 @@ class PlacaTesterApp(QMainWindow):
                 stopbits=serial.STOPBITS_ONE, xonxoff=False, rtscts=False, timeout=0.5
             )
             self.modbus_ser = ser_instance
-            # aplica DTR/RTS após abrir
-            try:
-                self.modbus_ser.dtr = dtr_state
-                self.modbus_ser.rts = rts_state
-            except Exception:
-                pass
+            # Aplica DTR/RTS apenas se o operador habilitou explicitamente.
+            if dtr_state or rts_state:
+                try:
+                    self.modbus_ser.dtr = dtr_state
+                    self.modbus_ser.rts = rts_state
+                except Exception:
+                    pass
             # Se o handshake configurado exige rtscts/xonxoff, aplica agora
             try:
                 if xonxoff or rtscts:
@@ -3562,11 +4497,12 @@ class PlacaTesterApp(QMainWindow):
                         port=target, baudrate=baud, bytesize=data_bits, parity=parity,
                         stopbits=serial.STOPBITS_ONE, xonxoff=xonxoff, rtscts=rtscts, timeout=0.5
                     )
-                    try:
-                        self.modbus_ser.dtr = dtr_state
-                        self.modbus_ser.rts = rts_state
-                    except Exception:
-                        pass
+                    if dtr_state or rts_state:
+                        try:
+                            self.modbus_ser.dtr = dtr_state
+                            self.modbus_ser.rts = rts_state
+                        except Exception:
+                            pass
             except Exception:
                 # Se falhar aplicar handshake, mantém conexão básica
                 pass
@@ -3581,7 +4517,7 @@ class PlacaTesterApp(QMainWindow):
             # Thread leitora
             new_reader_thread = SerialReaderThread(self.modbus_ser, "Modbus", is_modbus_port=True)
             new_reader_thread.data_received.connect(self._display_received_data)
-            new_reader_thread.connection_lost.connect(self._handle_connection_lost)
+            new_reader_thread.connection_lost.connect(self._legacy_handle_modbus_connection_lost)
             self.modbus_serial_reader_thread = new_reader_thread
             new_reader_thread.start()
 
@@ -3596,6 +4532,226 @@ class PlacaTesterApp(QMainWindow):
             self.log_message(f"Falha ao reconectar Modbus em '{target}': {e}. Tentativas restantes: {self.modbus_reconnect_attempts_remaining}", "erro")
             if self.modbus_reconnect_attempts_remaining > 0 and self.modbus_reconnect_timer:
                 self.modbus_reconnect_timer.start(2000)
+
+    def _get_serial_port_name(self, ser_instance):
+        if ser_instance is None:
+            return ""
+        return getattr(ser_instance, 'port', '') or getattr(ser_instance, 'portstr', '')
+
+    def _get_pyserial_parity(self, parity_text):
+        parity_value = str(parity_text or "Nenhuma").strip()
+        parity_aliases = {
+            "Nenhuma": serial.PARITY_NONE,
+            "None": serial.PARITY_NONE,
+            "NoParity": serial.PARITY_NONE,
+            "Ímpar": serial.PARITY_ODD,
+            "Impar": serial.PARITY_ODD,
+            "Ãmpar": serial.PARITY_ODD,
+            "Ç?mpar": serial.PARITY_ODD,
+            "OddParity": serial.PARITY_ODD,
+            "Par": serial.PARITY_EVEN,
+            "EvenParity": serial.PARITY_EVEN,
+            "Marca": serial.PARITY_MARK,
+            "MarkParity": serial.PARITY_MARK,
+            "Espaço": serial.PARITY_SPACE,
+            "Espaco": serial.PARITY_SPACE,
+            "EspaÃ§o": serial.PARITY_SPACE,
+            "EspaÇõo": serial.PARITY_SPACE,
+            "SpaceParity": serial.PARITY_SPACE,
+        }
+        return parity_aliases.get(parity_value, serial.PARITY_NONE)
+
+    def _cancel_serial_io(self, ser_instance):
+        if ser_instance is None:
+            return
+        try:
+            cancel_read = getattr(ser_instance, "cancel_read", None)
+            if callable(cancel_read):
+                cancel_read()
+        except Exception:
+            pass
+        try:
+            cancel_write = getattr(ser_instance, "cancel_write", None)
+            if callable(cancel_write):
+                cancel_write()
+        except Exception:
+            pass
+
+    def _ports_match(self, port_a, port_b):
+        if not port_a or not port_b:
+            return False
+        return port_a.strip().upper() == port_b.strip().upper()
+
+    def _ensure_shared_reader_thread(self, fallback_port_name, default_mode):
+        """
+        Garante uma única thread de leitura quando Principal e Modbus
+        compartilham a mesma porta COM.
+        """
+        current_thread = self.serial_command_reader_thread or self.modbus_serial_reader_thread
+
+        if current_thread is None:
+            ser_instance = self.serial_command_ser or self.modbus_ser
+            if ser_instance is None:
+                return
+            is_modbus_default = (default_mode == "modbus")
+            new_reader_thread = SerialReaderThread(ser_instance, fallback_port_name, is_modbus_port=is_modbus_default)
+            new_reader_thread.data_received.connect(self._display_received_data)
+            new_reader_thread.connection_lost.connect(self._handle_connection_lost)
+            self.serial_command_reader_thread = new_reader_thread
+            self.modbus_serial_reader_thread = new_reader_thread
+            new_reader_thread.start()
+        else:
+            self.serial_command_reader_thread = current_thread
+            self.modbus_serial_reader_thread = current_thread
+
+    def _is_shared_port_open(self):
+        return (
+            self.serial_command_ser is not None and
+            self.modbus_ser is not None and
+            self.serial_command_ser is self.modbus_ser and
+            getattr(self.serial_command_ser, "is_open", False)
+        )
+
+    def _get_port_settings_for_mode(self, mode):
+        try:
+            if mode == "modbus":
+                if self.current_test_steps and self.test_modbus_settings:
+                    return self.test_modbus_settings
+                return {
+                    "baud": self.modbus_baud_combo.currentText(),
+                    "data_bits": self.modbus_data_bits_combo.currentText(),
+                    "parity": self.modbus_parity_combo.currentText(),
+                    "handshake": self.modbus_handshake_combo.currentText(),
+                    "mode": self.modbus_mode_combo.currentText()
+                }
+            if self.current_test_steps and self.test_serial_command_settings:
+                return self.test_serial_command_settings
+            return {
+                "baud": self.serial_baud_combo.currentText(),
+                "data_bits": self.serial_data_bits_combo.currentText(),
+                "parity": self.serial_parity_combo.currentText(),
+                "handshake": self.serial_handshake_combo.currentText(),
+                "mode": self.serial_mode_combo.currentText()
+            }
+        except Exception:
+            return {}
+
+    def _apply_serial_settings(self, ser_instance, port_settings, set_dtr_rts=False, dtr_state=False, rts_state=False):
+        if not ser_instance or not getattr(ser_instance, "is_open", False) or not port_settings:
+            return
+        try:
+            baud = int(port_settings.get("baud", ser_instance.baudrate or 9600))
+        except Exception:
+            baud = ser_instance.baudrate or 9600
+        try:
+            data_bits = int(port_settings.get("data_bits", ser_instance.bytesize or 8))
+        except Exception:
+            data_bits = ser_instance.bytesize or 8
+
+        parity = self._get_pyserial_parity(port_settings.get("parity", "Nenhuma"))
+        flow_control_type = port_settings.get("handshake", "Nenhum")
+        xonxoff = flow_control_type == "XON/XOFF"
+        rtscts = flow_control_type == "RTS/CTS"
+
+        try:
+            ser_instance.baudrate = baud
+            ser_instance.bytesize = data_bits
+            ser_instance.parity = parity
+            ser_instance.xonxoff = xonxoff
+            ser_instance.rtscts = rtscts
+            if set_dtr_rts:
+                try:
+                    ser_instance.dtr = dtr_state
+                    ser_instance.rts = rts_state
+                except Exception:
+                    pass
+            try:
+                ser_instance.reset_input_buffer()
+                ser_instance.reset_output_buffer()
+            except Exception:
+                pass
+        except Exception as e:
+            self.log_message(f"AVISO: NÇœo foi possÇðvel aplicar configuraÇõÇæes de porta: {e}", "erro")
+
+    def _apply_shared_port_settings(self, mode):
+        if not self._is_shared_port_open():
+            return
+        if self._shared_port_mode == mode:
+            return
+        settings = self._get_port_settings_for_mode(mode)
+        self._apply_serial_settings(self.serial_command_ser, settings, set_dtr_rts=False)
+        self._shared_port_mode = mode
+
+    def _set_reader_mode(self, reader_thread, mode):
+        self._apply_shared_port_settings(mode)
+        if reader_thread and hasattr(reader_thread, "set_read_mode"):
+            try:
+                if getattr(reader_thread, "read_mode", None) != mode:
+                    reader_thread.set_read_mode(mode)
+                    reader_thread.clear_response_buffer_for_next_step()
+                else:
+                    reader_thread.set_read_mode(mode)
+            except Exception:
+                reader_thread.set_read_mode(mode)
+
+    def _open_serial_port_with_retry(self, port, baud, data_bits, parity, xonxoff, rtscts,
+                                     dtr_state, rts_state, attempts=5, retry_delay_s=0.35,
+                                     apply_modem_lines=False, reset_buffers=True,
+                                     refresh_ports_between_attempts=False,
+                                     stop_bits=serial.STOPBITS_ONE):
+        """
+        Abre uma porta serial com pequenas retentativas para lidar com conversores
+        USB/RS485 que demoram a estabilizar após um fechamento.
+        """
+        last_error = None
+        for attempt in range(1, attempts + 1):
+            ser_instance = None
+            try:
+                ser_instance = serial.Serial(
+                    port=port,
+                    baudrate=baud,
+                    bytesize=data_bits,
+                    parity=parity,
+                    stopbits=stop_bits,
+                    xonxoff=xonxoff,
+                    rtscts=rtscts,
+                    timeout=0.5
+                )
+                if apply_modem_lines:
+                    try:
+                        ser_instance.dtr = dtr_state
+                        ser_instance.rts = rts_state
+                    except Exception:
+                        pass
+                if reset_buffers:
+                    try:
+                        ser_instance.reset_input_buffer()
+                        ser_instance.reset_output_buffer()
+                    except Exception:
+                        try:
+                            ser_instance.flushInput()
+                            ser_instance.flushOutput()
+                        except Exception:
+                            pass
+                return ser_instance
+            except Exception as e:
+                last_error = e
+                try:
+                    if ser_instance and getattr(ser_instance, "is_open", False):
+                        ser_instance.close()
+                except Exception:
+                    pass
+
+                if attempt < attempts:
+                    try:
+                        QApplication.processEvents()
+                    except Exception:
+                        pass
+                    if refresh_ports_between_attempts:
+                        self._update_available_ports()
+                    time.sleep(retry_delay_s)
+
+        raise last_error
 
     def _toggle_serial_connection(self, port_type):
         """
@@ -3674,6 +4830,96 @@ class PlacaTesterApp(QMainWindow):
             if port == "Nenhuma porta COM encontrada" or not port:
                 QMessageBox.warning(self, "Erro de Conexão", f"Nenhuma porta serial selecionada ou disponível para a porta {log_prefix}.")
                 return
+
+            # Compartilhamento: permite Principal e Modbus na mesma COM
+            if port_type == "modbus":
+                other_ser = self.serial_command_ser
+                other_port = self._get_serial_port_name(other_ser)
+                if other_ser and other_ser.is_open and self._ports_match(port, other_port):
+                    self.modbus_ser = other_ser
+                    self.modbus_target_port = port
+                    # Mantem DTR/RTS atuais da porta compartilhada
+                    try:
+                        current_dtr = bool(self.modbus_ser.dtr)
+                        current_rts = bool(self.modbus_ser.rts)
+                        self.modbus_dtr_checkbox.blockSignals(True)
+                        self.modbus_dtr_checkbox.setChecked(current_dtr)
+                        self.modbus_dtr_checkbox.blockSignals(False)
+                        self.modbus_rts_checkbox.blockSignals(True)
+                        self.modbus_rts_checkbox.setChecked(current_rts)
+                        self.modbus_rts_checkbox.blockSignals(False)
+                    except Exception:
+                        pass
+
+                    port_combobox.setCurrentText(port)
+                    port_combobox.setEnabled(False)
+                    connect_button.setText(button_text_open)
+
+                    # Conecta os sinais dos checkboxes DTR/RTS para controle dinâmico
+                    self.modbus_dtr_checkbox.stateChanged.connect(lambda state: self._toggle_dtr(state, "modbus"))
+                    self.modbus_rts_checkbox.stateChanged.connect(lambda state: self._toggle_rts(state, "modbus"))
+
+                    # Habilita campos de envio manual/auto quando somente Modbus estiver aberto
+                    self.direct_command_input.setEnabled(True)
+                    self.direct_send_button.setEnabled(True)
+                    self.send_target_port_combo.setEnabled(True)
+                    self.modbus_display_text_cb.setEnabled(True)
+                    for i in range(len(self.send_command_inputs)):
+                        self.send_command_inputs[i].setEnabled(True)
+                        self.send_buttons[i].setEnabled(True)
+                        self.auto_send_checkboxes[i].setEnabled(True)
+                        self.auto_send_config_buttons[i].setEnabled(True)
+
+                    self._ensure_shared_reader_thread("Principal", "serial")
+                    self._update_start_test_button_state()
+                    self.log_message(f"Porta Modbus compartilhando a COM '{port}' com a Principal.", "sistema")
+                    return
+
+            if port_type == "serial_command":
+                other_ser = self.modbus_ser
+                other_port = self._get_serial_port_name(other_ser)
+                if other_ser and other_ser.is_open and self._ports_match(port, other_port):
+                    self.serial_command_ser = other_ser
+                    # Mantem DTR/RTS atuais da porta compartilhada
+                    try:
+                        current_dtr = bool(self.serial_command_ser.dtr)
+                        current_rts = bool(self.serial_command_ser.rts)
+                        self.serial_dtr_checkbox.blockSignals(True)
+                        self.serial_dtr_checkbox.setChecked(current_dtr)
+                        self.serial_dtr_checkbox.blockSignals(False)
+                        self.serial_rts_checkbox.blockSignals(True)
+                        self.serial_rts_checkbox.setChecked(current_rts)
+                        self.serial_rts_checkbox.blockSignals(False)
+                    except Exception:
+                        pass
+
+                    port_combobox.setCurrentText(port)
+                    port_combobox.setEnabled(False)
+                    connect_button.setText(button_text_open)
+
+                    # Conecta os sinais dos checkboxes DTR/RTS para controle dinâmico
+                    self.serial_dtr_checkbox.stateChanged.connect(lambda state: self._toggle_dtr(state, "serial_command"))
+                    self.serial_rts_checkbox.stateChanged.connect(lambda state: self._toggle_rts(state, "serial_command"))
+
+                    # Habilita campos de envio direto e automático para a porta principal
+                    self.direct_command_input.setEnabled(True)
+                    self.direct_send_button.setEnabled(True)
+                    self.send_target_port_combo.setEnabled(True)
+                    self.modbus_display_text_cb.setEnabled(True)
+                    self.direct_command_input.setFocus()
+
+                    for i in range(len(self.send_command_inputs)):
+                        self.send_command_inputs[i].setEnabled(True)
+                        self.send_buttons[i].setEnabled(True)
+                        self.auto_send_checkboxes[i].setEnabled(True)
+                        self.auto_send_config_buttons[i].setEnabled(True)
+                        if self.auto_send_checkboxes[i].isChecked():
+                            self._toggle_auto_send_timer(Qt.CheckState.Checked.value, i)
+
+                    self._ensure_shared_reader_thread("Modbus", "modbus")
+                    self._update_start_test_button_state()
+                    self.log_message(f"Porta Principal compartilhando a COM '{port}' com a Modbus.", "sistema")
+                    return
             
             baud = int(port_settings.get("baud", "9600"))
             data_bits = int(port_settings.get("data_bits", "8"))
@@ -3682,7 +4928,7 @@ class PlacaTesterApp(QMainWindow):
                 "Nenhuma": serial.PARITY_NONE, "Ímpar": serial.PARITY_ODD, "Par": serial.PARITY_EVEN,
                 "Marca": serial.PARITY_MARK, "Espaço": serial.PARITY_SPACE
             }
-            parity = parity_map.get(port_settings.get("parity", "Nenhuma"), serial.PARITY_NONE)
+            parity = self._get_pyserial_parity(port_settings.get("parity", "Nenhuma"))
 
             flow_control_type = port_settings.get("handshake", "Nenhum")
             xonxoff = False
@@ -3691,29 +4937,35 @@ class PlacaTesterApp(QMainWindow):
             elif flow_control_type == "XON/XOFF": xonxoff = True
 
             try:
-                # Tenta criar a instância da porta serial
-                # REMOVIDO: Força DTR e RTS para False na abertura para evitar resets
-                ser_instance = serial.Serial(
-                    port=port, baudrate=baud, bytesize=data_bits, parity=parity,
-                    stopbits=serial.STOPBITS_ONE, xonxoff=xonxoff, rtscts=rtscts, 
-                    timeout=0.5
+                ser_instance = self._open_serial_port_with_retry(
+                    port=port,
+                    baud=baud,
+                    data_bits=data_bits,
+                    parity=parity,
+                    xonxoff=xonxoff,
+                    rtscts=rtscts,
+                    dtr_state=dtr_state,
+                    rts_state=rts_state,
+                    apply_modem_lines=(dtr_state or rts_state),
+                    attempts=5,
+                    retry_delay_s=0.35,
+                    reset_buffers=True,
+                    refresh_ports_between_attempts=True
                 )
                 setattr(self, ser_attr, ser_instance)
                 current_ser = getattr(self, ser_attr)
                 # Se Modbus, guarda porta alvo para auto-reconectar
                 if port_type == "modbus":
                     self.modbus_target_port = port
-                
-                # ADICIONADO: Após a abertura, aplica o estado desejado pelos checkboxes
+                    self.modbus_reconnect_attempts_remaining = 0
+                    if self.modbus_reconnect_timer:
+                        self.modbus_reconnect_timer.stop()
+
                 try:
-                    current_ser.dtr = dtr_state
-                    current_ser.rts = rts_state
-                except Exception as dtr_rts_e:
-                    self.log_message(f"AVISO: Não foi possível definir DTR/RTS para a porta {log_prefix}: {dtr_rts_e}. Verifique a compatibilidade do hardware/driver.", "erro")
-
-
-                current_ser.flushInput() # Limpa buffers de entrada e saída
-                current_ser.flushOutput()
+                    current_ser.flushInput() # Limpa buffers de entrada e saída
+                    current_ser.flushOutput()
+                except Exception:
+                    pass
                 self.log_message(f"Conectado à porta {port}.", "sistema")
                 connect_button.setText(button_text_open)
                 
@@ -3766,9 +5018,12 @@ class PlacaTesterApp(QMainWindow):
 
             except serial.SerialException as e:
                 QMessageBox.critical(self, "Erro de Conexão", f"Não foi possível conectar à porta serial ({log_prefix}):\n{e}")
-                self._disconnect_port_ui(port_type, reset_selection=True) # Garante que a UI seja resetada em caso de falha
+                self._disconnect_port_ui(port_type, reset_selection=False)
+                self._update_available_ports()
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Ocorreu um erro inesperado ao conectar ({log_prefix}):\n{e}")
+                self._disconnect_port_ui(port_type, reset_selection=False)
+                self._update_available_ports()
         else:
             # Se a porta já está aberta, tenta fechá-la (fechamento manual)
             self._disconnect_port_ui(port_type, reset_selection=False) # Não reseta a seleção
@@ -3794,26 +5049,54 @@ class PlacaTesterApp(QMainWindow):
             self._update_start_test_button_state()
             self._stop_test_if_connection_lost() # Verifica se o teste deve ser parado
 
-    def _disconnect_port_ui(self, port_type, reset_selection=True):
+    def _disconnect_port_ui(self, port_type, reset_selection=True, force_close=False):
         """
         Desconecta a porta serial e para a thread de leitura associada.
         Usado internamente para garantir uma desconexão limpa.
         Adicionado 'reset_selection' para controlar se o combobox deve ser limpo.
+        Adicionado 'force_close' para fechar mesmo quando a porta e compartilhada.
         """
         reader_thread_attr = 'serial_command_reader_thread' if port_type == "serial_command" else 'modbus_serial_reader_thread'
         ser_attr = 'serial_command_ser' if port_type == "serial_command" else 'modbus_ser'
+        other_reader_thread_attr = 'modbus_serial_reader_thread' if port_type == "serial_command" else 'serial_command_reader_thread'
+        other_ser_attr = 'modbus_ser' if port_type == "serial_command" else 'serial_command_ser'
         port_combobox = self.serial_command_port_combobox if port_type == "serial_command" else self.modbus_port_combobox
         connect_button = self.connect_serial_command_button if port_type == "serial_command" else self.connect_modbus_button
 
         reader_thread = getattr(self, reader_thread_attr)
-        if reader_thread:
-            reader_thread.stop() # Para a thread de leitura
-            setattr(self, reader_thread_attr, None) # Remove a referência à thread
+        other_reader_thread = getattr(self, other_reader_thread_attr)
         
         current_ser = getattr(self, ser_attr)
+        other_ser = getattr(self, other_ser_attr)
+        shared_ser = (current_ser is not None and other_ser is not None and current_ser is other_ser)
+        keep_port_open = shared_ser and other_ser.is_open and not force_close
+        shared_thread = (reader_thread is not None and reader_thread is other_reader_thread)
+
         if current_ser and current_ser.is_open:
+            self._manual_port_close_until[port_type] = time.time() + 3.0
+            self._cancel_serial_io(current_ser)
+            if port_type == "modbus":
+                self.modbus_reconnect_attempts_remaining = 0
+                if self.modbus_reconnect_timer:
+                    self.modbus_reconnect_timer.stop()
+
+        if reader_thread:
+            if shared_thread and keep_port_open:
+                setattr(self, reader_thread_attr, None)
+            else:
+                reader_thread.stop() # Para a thread de leitura
+                setattr(self, reader_thread_attr, None) # Remove a referência à thread
+
+        if current_ser and current_ser.is_open and not keep_port_open:
             try:
+                self._cancel_serial_io(current_ser)
+                try:
+                    current_ser.reset_input_buffer()
+                    current_ser.reset_output_buffer()
+                except Exception:
+                    pass
                 current_ser.close() # Fecha a porta serial
+                time.sleep(0.2)
             except Exception as e:
                 self.log_message(f"Erro ao fechar a porta serial ({port_type}) em disconnect_port_ui: {e}", "erro")
         setattr(self, ser_attr, None) # Remove a referência à instância serial
@@ -3849,9 +5132,19 @@ class PlacaTesterApp(QMainWindow):
         if port_type == "serial_command":
             # Atualiza texto do botão para refletir estado de porta fechada
             connect_button.setText("Abrir Porta Principal")
-            # Desabilita campos de envio direto/linhas quando a conexão cai
+        else:
+            connect_button.setText("Abrir Porta Modbus")
+
+        any_connected = (
+            (self.serial_command_ser is not None and self.serial_command_ser.is_open) or
+            (self.modbus_ser is not None and self.modbus_ser.is_open)
+        )
+        if not any_connected:
+            # Desabilita campos de envio direto/linhas quando nenhuma porta esta aberta
             self.direct_command_input.setEnabled(False)
             self.direct_send_button.setEnabled(False)
+            self.send_target_port_combo.setEnabled(False)
+            self.modbus_display_text_cb.setEnabled(False)
             for i in range(len(self.send_command_inputs)):
                 self.send_command_inputs[i].setEnabled(False)
                 self.send_buttons[i].setEnabled(False)
@@ -3859,9 +5152,9 @@ class PlacaTesterApp(QMainWindow):
                 self.auto_send_checkboxes[i].setChecked(False)
                 self.auto_send_config_buttons[i].setEnabled(False)
                 self.auto_send_timers[i].stop()
-        else:
-            connect_button.setText("Abrir Porta Modbus")
-
+        if not self._is_shared_port_open():
+            self._shared_port_mode = None
+        self._update_available_ports()
 
     def _toggle_dtr(self, state, port_type):
         """
@@ -3953,6 +5246,16 @@ class PlacaTesterApp(QMainWindow):
         """
         can_start = False
         if self.current_test_steps: # Verifica se há passos de teste carregados
+            if self._required_test_profile_keys():
+                can_start = True
+                self.modbus_required_for_test = any(
+                    (self._get_test_port_profile(step.get("test_port_key")) or {}).get("role") == "modbus"
+                    or step.get("tipo_passo") == "modbus_comando"
+                    for step in self.current_test_steps
+                )
+                self.start_test_button.setEnabled(can_start and not self.test_in_progress)
+                return
+
             serial_command_connected = (self.serial_command_ser is not None and self.serial_command_ser.is_open)
             modbus_connected = (self.modbus_ser is not None and self.modbus_ser.is_open)
 
@@ -3972,6 +5275,29 @@ class PlacaTesterApp(QMainWindow):
         Lida com a perda de conexão de uma porta serial.
         Exibe um aviso e tenta desconectar a porta afetada.
         """
+        runtime_profile = next(
+            (profile for profile in self.test_port_profiles if profile.get("display_name") == port_name),
+            None,
+        )
+        if runtime_profile is not None:
+            self.log_message(f"AVISO: A conexão com a porta lógica '{port_name}' foi perdida.", "erro")
+            self._close_test_runtime_ports()
+            if self.test_in_progress:
+                self._finish_test()
+            QMessageBox.warning(self, "Conexão Perdida", f"A conexão com a porta lógica '{port_name}' foi perdida.")
+            return
+
+        port_key = ""
+        if port_name == "Principal":
+            port_key = "serial_command"
+        elif port_name == "Modbus":
+            port_key = "modbus"
+
+        if port_key:
+            close_until = self._manual_port_close_until.get(port_key, 0.0)
+            if close_until and time.time() <= close_until:
+                return
+
         # Ignora perda da Principal durante fechamento temporário para gravação
         try:
             if getattr(self, '_flash_temporarily_closing_principal', False) and port_name == "Principal":
@@ -3980,8 +5306,17 @@ class PlacaTesterApp(QMainWindow):
             pass
         self.log_message(f"AVISO: A conexão com a porta serial '{port_name}' foi perdida. Desconectando.", "erro")
         
+        shared_port = (
+            self.serial_command_ser is not None and
+            self.modbus_ser is not None and
+            self.serial_command_ser is self.modbus_ser
+        )
+
         # Determina qual porta foi perdida e desconecta sua UI, resetando a seleção
-        if port_name == "Principal":
+        if shared_port:
+            self._disconnect_port_ui("serial_command", reset_selection=True, force_close=True)
+            self._disconnect_port_ui("modbus", reset_selection=True, force_close=True)
+        elif port_name == "Principal":
             self._disconnect_port_ui("serial_command", reset_selection=True)
         elif port_name == "Modbus":
             self._disconnect_port_ui("modbus", reset_selection=True)
@@ -4047,6 +5382,8 @@ class PlacaTesterApp(QMainWindow):
         # Seleciona a porta alvo de acordo com o seletor
         target_name = self.send_target_port_combo.currentText() if hasattr(self, 'send_target_port_combo') else "Principal"
         target_ser = self.serial_command_ser if target_name == "Principal" else self.modbus_ser
+        target_reader = self.serial_command_reader_thread if target_name == "Principal" else self.modbus_serial_reader_thread
+        self._set_reader_mode(target_reader, "serial" if target_name == "Principal" else "modbus")
 
         if target_ser and target_ser.is_open:
             try:
@@ -4055,7 +5392,7 @@ class PlacaTesterApp(QMainWindow):
                 # Adiciona uma linha vazia antes do envio
                 self.log_message("\n", "informacao") 
                 target_ser.write(command.encode()) # Envia o comando codificado
-                self.log_message(f"Enviado ({target_name}): {command.strip()}", "enviado")
+                self.log_message(f"Enviado ({target_name}): {command.strip()}", "enviado", target_name)
                 self.direct_command_input.clear() # Limpa o campo de entrada
             except serial.SerialException as e:
                 QMessageBox.critical(self, "Erro de Envio", f"Erro ao enviar comando:\n{e}\nConexão pode ter sido perdida.")
@@ -4081,6 +5418,8 @@ class PlacaTesterApp(QMainWindow):
 
         target_name = self.send_target_port_combo.currentText() if hasattr(self, 'send_target_port_combo') else "Principal"
         target_ser = self.serial_command_ser if target_name == "Principal" else self.modbus_ser
+        target_reader = self.serial_command_reader_thread if target_name == "Principal" else self.modbus_serial_reader_thread
+        self._set_reader_mode(target_reader, "serial" if target_name == "Principal" else "modbus")
         if target_ser and target_ser.is_open:
             try:
                 target_ser.reset_input_buffer()
@@ -4088,7 +5427,7 @@ class PlacaTesterApp(QMainWindow):
                 # Adiciona uma linha vazia antes do envio
                 self.log_message("\n", "informacao")
                 target_ser.write(command.encode())
-                self.log_message(f"Enviado ({target_name}): {command.strip()}", "enviado")
+                self.log_message(f"Enviado ({target_name}): {command.strip()}", "enviado", target_name)
             except serial.SerialException as e:
                 self.log_message(f"Erro no auto-envio {index+1}: {e}", "erro")
                 self.auto_send_timers[index].stop()
@@ -4125,6 +5464,8 @@ class PlacaTesterApp(QMainWindow):
 
         target_name = self.send_target_port_combo.currentText() if hasattr(self, 'send_target_port_combo') else "Principal"
         target_ser = self.serial_command_ser if target_name == "Principal" else self.modbus_ser
+        target_reader = self.serial_command_reader_thread if target_name == "Principal" else self.modbus_serial_reader_thread
+        self._set_reader_mode(target_reader, "serial" if target_name == "Principal" else "modbus")
         if target_ser and target_ser.is_open:
             try:
                 target_ser.reset_input_buffer()
@@ -4132,7 +5473,7 @@ class PlacaTesterApp(QMainWindow):
                 # Adiciona uma linha vazia antes do envio
                 self.log_message("\n", "informacao")
                 target_ser.write(command.encode())
-                self.log_message(f"Enviado ({target_name}): {command.strip()}", "enviado")
+                self.log_message(f"Enviado ({target_name}): {command.strip()}", "enviado", target_name)
             except serial.SerialException as e:
                 QMessageBox.critical(self, "Erro de Envio", f"Erro ao enviar comando:\n{e}\nConexão pode ter sido perdida.")
                 self._handle_connection_lost(target_name)
@@ -4205,26 +5546,34 @@ class PlacaTesterApp(QMainWindow):
         Se a 'data' for uma string vazia, isso representa uma linha em branco
         enviada pelo dispositivo, e será logada como tal.
         """
-        # Se for Modbus (bytes), exibe como texto somente se for majoritariamente imprimível; senão, usa HEX
-        if source_port_name == "Modbus" and isinstance(data, bytes):
+        # Se for bytes, exibe como texto quando for imprimivel; senao, usa HEX
+        if isinstance(data, (bytes, bytearray)):
             try:
-                if hasattr(self, "modbus_display_text_cb") and self.modbus_display_text_cb.isChecked():
-                    # Heurística: considera texto se >=90% dos bytes forem imprimíveis (ASCII) ou controles \t\r\n
-                    total = max(1, len(data))
-                    printable = sum(1 for x in data if (32 <= x <= 126) or x in (9, 10, 13))
-                    if printable / total >= 0.9 and b"\x00" not in data:
-                        txt = data.decode("latin-1", errors="replace")
-                        self.log_message(f"Recebido (Modbus Texto): {txt}", "recebido")
+                # Heurística: considera texto se >=90% dos bytes forem imprimíveis (ASCII) ou controles \t\r\n
+                total = max(1, len(data))
+                printable = sum(1 for x in data if (32 <= x <= 126) or x in (9, 10, 13))
+                use_text = (
+                    hasattr(self, "modbus_display_text_cb") and
+                    self.modbus_display_text_cb.isChecked() and
+                    printable / total >= 0.9 and
+                    b"\x00" not in data
+                )
+                if use_text:
+                    txt = data.decode("latin-1", errors="replace")
+                    if source_port_name == "Modbus":
+                        self.log_message(f"Recebido (Modbus Texto): {txt}", "recebido", source_port_name)
                     else:
-                        display_data = data.hex().upper()
-                        self.log_message(f"Recebido (Modbus): {display_data}", "recebido")
+                        self.log_message(f"Recebido: {txt}", "recebido", source_port_name)
                 else:
                     display_data = data.hex().upper()
-                    self.log_message(f"Recebido (Modbus): {display_data}", "recebido")
+                    if source_port_name == "Modbus":
+                        self.log_message(f"Recebido (Modbus): {display_data}", "recebido", source_port_name)
+                    else:
+                        self.log_message(f"Recebido (HEX): {display_data}", "recebido", source_port_name)
             except Exception:
                 pass
         else: # Se for serial principal (string)
-            self.log_message(f"Recebido: {data}", "recebido") 
+            self.log_message(f"Recebido: {data}", "recebido", source_port_name) 
 
         
 
@@ -4236,7 +5585,7 @@ class PlacaTesterApp(QMainWindow):
         status = "ATIVADO" if self.fast_mode_active else "DESATIVADO"        
         self.log_message(f"Modo Fast {'ATIVADO' if self.fast_mode_active else 'DESATIVADO'}!", "sistema")
 
-    def log_message(self, message, msg_type="informacao"):
+    def log_message(self, message, msg_type="informacao", source_port=""):
         # Ignorar mensagens técnicas no terminal
         for prefix in ("Recebido:", "Enviado:", "Comando Enviado:", "Resposta Coletada para Validação:"):
             if message.startswith(prefix):
@@ -4245,27 +5594,31 @@ class PlacaTesterApp(QMainWindow):
 
         color = self.LOG_COLORS.get(msg_type, self.LOG_COLORS["informacao"])
 
+        ts = datetime.now()
+        if self._datalogger_last_ts is None:
+            latency_ms = 0.0
+        else:
+            latency_ms = (ts - self._datalogger_last_ts).total_seconds() * 1000.0
+
+        datalogger_event = {
+            "timestamp": ts,
+            "msg_type": msg_type,
+            "source_port": source_port,
+            "message": message,
+            "latency_ms": round(latency_ms, 3),
+        }
+
+        try:
+            if self.datalogger_config_panel is not None and hasattr(self.datalogger_config_panel, "consume_live_event"):
+                self.datalogger_config_panel.consume_live_event(dict(datalogger_event))
+        except Exception:
+            pass
+
         try:
             if self.datalogger_enabled and self.datalogger_path:
-                ts = datetime.now()
-                if self._datalogger_last_ts is None:
-                    latency_ms = 0.0
-                else:
-                    latency_ms = (ts - self._datalogger_last_ts).total_seconds() * 1000.0
                 self._datalogger_last_ts = ts
                 try:
-                    if os.path.exists(self.datalogger_path):
-                        wb = load_workbook(self.datalogger_path)
-                        ws = wb.active
-                    else:
-                        wb = Workbook()
-                        ws = wb.active
-                        ws.title = "DataLogger"
-                        ws.append(["DataHora", "Tipo", "Enviado", "Recebido", "Latencia_ms"])
-                    sent_val = message if msg_type == "enviado" else ""
-                    recv_val = message if msg_type == "recebido" else ""
-                    ws.append([ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3], msg_type, sent_val, recv_val, round(latency_ms, 3)])
-                    wb.save(self.datalogger_path)
+                    self.datalogger_manager.append_event(dict(datalogger_event))
                 except Exception:
                     pass
         except Exception:
@@ -4275,6 +5628,9 @@ class PlacaTesterApp(QMainWindow):
         if self.log_interaction_count >= 1500: # Limite de interações para limpar o log
             self.log_text_edit.clear()
             self.log_text_edit.append(f"<font color='#AAAAAA'>--- Log Limpo ---</font>")
+            if hasattr(self, "test_creator_log_text_edit") and self.test_creator_log_text_edit is not None:
+                self.test_creator_log_text_edit.clear()
+                self.test_creator_log_text_edit.append(f"<font color='#AAAAAA'>--- Log Limpo ---</font>")
             self.log_interaction_count = 0
         # Evita inserir mensagens duplicadas consecutivas
         try:
@@ -4291,6 +5647,11 @@ class PlacaTesterApp(QMainWindow):
         self.log_text_edit.append(full_line)
         self.log_text_edit.setUpdatesEnabled(True)
         self.log_text_edit.verticalScrollBar().setValue(self.log_text_edit.verticalScrollBar().maximum())
+        if hasattr(self, "test_creator_log_text_edit") and self.test_creator_log_text_edit is not None:
+            self.test_creator_log_text_edit.setUpdatesEnabled(False)
+            self.test_creator_log_text_edit.append(full_line)
+            self.test_creator_log_text_edit.setUpdatesEnabled(True)
+            self.test_creator_log_text_edit.verticalScrollBar().setValue(self.test_creator_log_text_edit.verticalScrollBar().maximum())
         
         # Removido: o gatilho baseado no texto do log foi substituído por uma chamada direta em _on_new_dir_detected
         
@@ -4304,51 +5665,183 @@ class PlacaTesterApp(QMainWindow):
         context_menu.addAction(clear_action)
         context_menu.exec(self.log_text_edit.mapToGlobal(pos))
 
+    def _show_test_creator_log_context_menu(self, pos):
+        """
+        Exibe o menu de contexto para o terminal do Criador de Teste.
+        """
+        context_menu = QMenu(self)
+        clear_action = QAction("Limpar Terminal", self)
+        clear_action.triggered.connect(self._clear_terminal_log)
+        context_menu.addAction(clear_action)
+        context_menu.exec(self.test_creator_log_text_edit.mapToGlobal(pos))
+
     def _clear_terminal_log(self):
         """
         Limpa o conteúdo do QTextEdit do log.
         """
         self.log_text_edit.clear()
         self.log_text_edit.append(f"<font color='#AAAAAA'>--- Terminal Limpo ---</font>")
+        if hasattr(self, "test_creator_log_text_edit") and self.test_creator_log_text_edit is not None:
+            self.test_creator_log_text_edit.clear()
+            self.test_creator_log_text_edit.append(f"<font color='#AAAAAA'>--- Terminal Limpo ---</font>")
         self.log_interaction_count = 0 # Reseta o contador de interações
 
-    def _choose_datalogger_file(self):
-        """Permite escolher/criar a planilha do DataLogger (.xlsx) e prepara cabeçalhos."""
+    def _default_datalogger_file_path(self):
+        base_dir = os.path.join(os.path.expanduser("~"), "Documents", "EmbTechSerial", "DataLogger")
+        os.makedirs(base_dir, exist_ok=True)
+        return os.path.join(base_dir, datetime.now().strftime("EmbTech_DataLogger_%Y%m%d_%H%M%S.xlsx"))
+
+    def _ensure_advanced_datalogger_loaded(self):
+        global DATALOGGER_MODULE_AVAILABLE, DataLoggerConfigDialog, DataLoggerManager
+        if DATALOGGER_MODULE_AVAILABLE is True and DataLoggerConfigDialog is not None:
+            return True
+        if DATALOGGER_MODULE_AVAILABLE is False:
+            return False
         try:
-            default_name = datetime.now().strftime("EmbTech_DataLogger_%Y%m%d_%H%M%S.xlsx")
-            path, _ = QFileDialog.getSaveFileName(self, "Selecionar arquivo do DataLogger", default_name, "Planilhas Excel (*.xlsx)")
-            if not path:
+            module = importlib.import_module("datalogger_module")
+            DataLoggerConfigDialog = getattr(module, "DataLoggerConfigDialog", None)
+            advanced_manager_cls = getattr(module, "DataLoggerManager", None)
+            if DataLoggerConfigDialog is None or advanced_manager_cls is None:
+                DATALOGGER_MODULE_AVAILABLE = False
+                return False
+            DATALOGGER_MODULE_AVAILABLE = True
+            if not isinstance(self.datalogger_manager, advanced_manager_cls):
+                self.datalogger_manager = advanced_manager_cls(self.datalogger_settings)
+            DataLoggerManager = advanced_manager_cls
+            self._sync_datalogger_runtime()
+            return True
+        except Exception:
+            DATALOGGER_MODULE_AVAILABLE = False
+            return False
+
+    def _ensure_relatorio_tab_loaded(self):
+        if self.relatorio_widget is not None and self.relatorio_tab_index != -1:
+            return True
+        try:
+            module = importlib.import_module("relatorio_eficiencia_widget")
+            widget_cls = getattr(module, "RelatorioEficienciaWidget", None)
+            if widget_cls is None:
+                return False
+            self.relatorio_widget = widget_cls(
+                logs_dir=self.configuracoes_tab.get_log_path(),
+                parent=self
+            )
+            self.relatorio_tab_index = self.tab_widget.addTab(self.relatorio_widget, "Relatórios")
+            self.tab_widget.setTabVisible(self.relatorio_tab_index, False)
+            return True
+        except Exception:
+            self.relatorio_widget = None
+            self.relatorio_tab_index = -1
+            return False
+
+    def _ensure_oled_display(self):
+        if self.oled is not None:
+            return self.oled
+        try:
+            module = importlib.import_module("oled_timer_display")
+            oled_cls = getattr(module, "OledTimerDisplay", None)
+            if oled_cls is None:
+                return None
+            self.oled = oled_cls()
+            self.oled.hide()
+        except Exception:
+            self.oled = None
+        return self.oled
+
+    def _sync_datalogger_runtime(self):
+        self.datalogger_manager.update_settings(self.datalogger_settings)
+        self.datalogger_path = str(self.datalogger_settings.get("file_path", "")).strip()
+
+    def _open_datalogger_config_dialog(self):
+        try:
+            if not self._ensure_advanced_datalogger_loaded():
+                QMessageBox.warning(
+                    self,
+                    "DataLogger",
+                    "O módulo avançado do DataLogger não está disponível neste ambiente.",
+                )
                 return
-            if not path.lower().endswith(".xlsx"):
-                path += ".xlsx"
-            try:
-                if not os.path.exists(path):
-                    wb = Workbook()
-                    ws = wb.active
-                    ws.title = "DataLogger"
-                    ws.append(["DataHora", "Tipo", "Enviado", "Recebido", "Latencia_ms"])
-                    wb.save(path)
-            except Exception as e:
-                QMessageBox.warning(self, "Erro", f"Não foi possível criar o arquivo:\n{e}")
+            current_settings = dict(self.datalogger_settings)
+            if not str(current_settings.get("file_path", "")).strip():
+                current_settings["file_path"] = self._default_datalogger_file_path()
+            if self.datalogger_tab_index != -1 and self.datalogger_tab_widget is not None:
+                self.tab_widget.setCurrentIndex(self.datalogger_tab_index)
                 return
-            self.datalogger_path = path
-            if self.datalogger_cb.isChecked():
-                self._datalogger_last_ts = None
-            QMessageBox.information(self, "DataLogger", f"Arquivo selecionado:\n{self.datalogger_path}")
+
+            panel = DataLoggerConfigDialog(
+                current_settings,
+                preview_state=self.datalogger_manager.get_preview_state(),
+                parent=self,
+                embedded=True,
+            )
+            panel._embedded_save_handler = self._save_datalogger_settings_from_tab
+
+            tab = QWidget()
+            tab_layout = QVBoxLayout(tab)
+            tab_layout.setContentsMargins(8, 8, 8, 8)
+            tab_layout.addWidget(panel)
+
+            self.datalogger_config_panel = panel
+            self.datalogger_tab_widget = tab
+            self.datalogger_tab_index = self.tab_widget.addTab(tab, "DataLogger")
+            self.tab_widget.setCurrentIndex(self.datalogger_tab_index)
         except Exception as e:
-            QMessageBox.warning(self, "Erro", f"Falha ao selecionar arquivo do DataLogger:\n{e}")
+            QMessageBox.warning(self, "Erro", f"Falha ao configurar o DataLogger:\n{e}")
+
+    def _save_datalogger_settings_from_tab(self, settings):
+        self.datalogger_settings = dict(settings or {})
+        self._sync_datalogger_runtime()
+        self.datalogger_manager.ensure_workbook()
+        self._save_settings()
+        QMessageBox.information(self, "DataLogger", f"Configuração salva.\nArquivo: {self.datalogger_path}")
+
+    def _close_datalogger_tab(self, save_current=False):
+        if self.datalogger_config_panel is not None and save_current and hasattr(self.datalogger_config_panel, "save_settings"):
+            try:
+                self.datalogger_settings = dict(self.datalogger_config_panel.save_settings() or {})
+                self._sync_datalogger_runtime()
+                self._save_settings()
+            except Exception:
+                pass
+
+        tab_index = self.datalogger_tab_index
+        tab_widget = self.datalogger_tab_widget
+        self.datalogger_config_panel = None
+        self.datalogger_tab_widget = None
+        self.datalogger_tab_index = -1
+
+        if tab_index != -1:
+            try:
+                self.tab_widget.removeTab(tab_index)
+            except Exception:
+                pass
+
+        if tab_widget is not None:
+            try:
+                tab_widget.deleteLater()
+            except Exception:
+                pass
 
     def _toggle_datalogger(self, checked):
-        """Liga/desliga o DataLogger e garante que haja um arquivo válid."""
+        """Liga/desliga o DataLogger e garante que haja uma configuração válida."""
         try:
             if checked:
+                if not self._ensure_advanced_datalogger_loaded():
+                    self.datalogger_cb.blockSignals(True)
+                    self.datalogger_cb.setChecked(False)
+                    self.datalogger_cb.blockSignals(False)
+                    QMessageBox.warning(self, "DataLogger", "O módulo avançado do DataLogger não está disponível neste ambiente.")
+                    return
                 if not self.datalogger_path:
-                    self._choose_datalogger_file()
+                    self._open_datalogger_config_dialog()
                     if not self.datalogger_path:
                         self.datalogger_cb.blockSignals(True)
                         self.datalogger_cb.setChecked(False)
                         self.datalogger_cb.blockSignals(False)
+                        self.log_message("Configure e salve o DataLogger na aba dedicada antes de ativar.", "informacao")
                         return
+                self._sync_datalogger_runtime()
+                self.datalogger_manager.ensure_workbook()
                 self._datalogger_last_ts = None
                 self.datalogger_enabled = True
                 self.log_message("DataLogger ATIVADO.", "sistema")
@@ -4378,6 +5871,7 @@ class PlacaTesterApp(QMainWindow):
                         self.modbus_required_for_test = any(step.get("tipo_validacao") == "modbus" for step in loaded_steps if step.get("tipo_passo") == "comando_validacao")
                         self.test_serial_command_settings = {}
                         self.test_modbus_settings = {}
+                        self.test_port_profiles = []
                         self.fast_mode_secret_code = "" # Não existia em versões antigas
                     else: # Formato de arquivo mais recente (1.1 para incluir modo fast, 1.2 para tempo de espera, 1.3 para tabela modbus, 1.4 para modbus exclusivo)
                         loaded_steps = loaded_data.get("steps", [])
@@ -4386,6 +5880,7 @@ class PlacaTesterApp(QMainWindow):
                         port_configs = loaded_data.get("port_configurations", {})
                         self.test_serial_command_settings = port_configs.get("serial_command", {})
                         self.test_modbus_settings = port_configs.get("modbus", {})
+                        self.test_port_profiles = self._normalize_test_port_profiles(port_configs.get("profiles", []))
 
                     if not isinstance(loaded_steps, list):
                         raise ValueError("O conteúdo do arquivo não é uma lista de passos de teste.")
@@ -4410,6 +5905,15 @@ class PlacaTesterApp(QMainWindow):
                         
                         if step["tipo_passo"] == "comando_validacao":
                             step["port_type"] = step.get("port_type", "serial") 
+                            if not step.get("test_port_key") and self.test_port_profiles:
+                                if step.get("port_type") == "modbus":
+                                    modbus_profiles = self._get_enabled_test_port_profiles("modbus")
+                                    if modbus_profiles:
+                                        step["test_port_key"] = modbus_profiles[0].get("key", "")
+                                else:
+                                    serial_profiles = self._get_enabled_test_port_profiles("serial")
+                                    if serial_profiles:
+                                        step["test_port_key"] = serial_profiles[0].get("key", "")
                             if not all(k in step for k in ["comando_enviar", "esperar_resposta", "timeout_ms", "tipo_validacao"]):
                                 raise ValueError(f"Passo '{step.get('nome', 'N/A')}' do tipo 'comando_validacao' está mal formatado.")
                             
@@ -4450,6 +5954,10 @@ class PlacaTesterApp(QMainWindow):
                                 raise ValueError(f"Passo '{step.get('nome', 'N/A')}' do tipo 'tempo_espera' tem duração inválida.")
                         
                         elif step["tipo_passo"] == "modbus_comando": # NOVO: Validação para o passo Modbus
+                            if not step.get("test_port_key") and self.test_port_profiles:
+                                modbus_profiles = self._get_enabled_test_port_profiles("modbus")
+                                if modbus_profiles:
+                                    step["test_port_key"] = modbus_profiles[0].get("key", "")
                             if "modbus_params" not in step or not isinstance(step["modbus_params"], list):
                                 raise ValueError(f"Passo '{step.get('nome', 'N/A')}' do tipo 'modbus_comando' faltando 'modbus_params' ou formato inválido.")
                             for entry in step["modbus_params"]:
@@ -4484,6 +5992,14 @@ class PlacaTesterApp(QMainWindow):
                     self.current_test_steps = loaded_steps # Atribui os passos carregados
                     self.fast_mode_code_input.setText(self.fast_mode_secret_code) # Atualiza o campo na UI
 
+                    if not any(profile.get("enabled") for profile in self.test_port_profiles):
+                        self.test_port_profiles = self._build_profiles_from_legacy_settings()
+                        for step in self.current_test_steps:
+                            if step.get("tipo_passo") == "comando_validacao" and not step.get("test_port_key"):
+                                step["test_port_key"] = "porta_2" if step.get("port_type") == "modbus" and self.test_modbus_settings else "porta_1"
+                            elif step.get("tipo_passo") == "modbus_comando" and not step.get("test_port_key") and self.test_modbus_settings:
+                                step["test_port_key"] = "porta_2"
+
                 # Ajusta a visibilidade do grupo Modbus com base na necessidade do teste
                 # Agora, a visibilidade do grupo Modbus é controlada pela flag modbus_required_for_test
                 self.modbus_serial_group.setVisible(self.modbus_required_for_test)
@@ -4495,6 +6011,7 @@ class PlacaTesterApp(QMainWindow):
                     self.modbus_config_toggle_button.setChecked(True)
 
                 self._update_test_port_settings_display() # Atualiza a exibição das configurações de porta
+                self._refresh_test_port_selectors()
                 self._apply_test_port_settings_to_main_ui() # Aplica as configs carregadas nos controles da interface
                 self._update_start_test_button_state() # Atualiza o estado do botão "Iniciar Teste"
                 self.test_status_label.setText(f"Status do Teste: Carregado '{os.path.basename(file_path)}'")
@@ -4567,16 +6084,19 @@ class PlacaTesterApp(QMainWindow):
         """
         serial_command_connected = (self.serial_command_ser is not None and self.serial_command_ser.is_open)
         modbus_connected = (self.modbus_ser is not None and self.modbus_ser.is_open)
-        self.oled._reposicionar_no_topo()
-        self.oled.show()
+        uses_runtime_profiles = bool(self._required_test_profile_keys())
+        oled = self._ensure_oled_display()
+        if oled is not None:
+            oled._reposicionar_no_topo()
+            oled.show()
         # Verifica se as portas necessárias estão conectadas
-        if not serial_command_connected:
+        if not uses_runtime_profiles and not serial_command_connected:
             QMessageBox.warning(self, "Conexão Necessária", "A Porta Serial Principal não está conectada. Por favor, abra a porta antes de iniciar o teste.")
             return
 
         # Verifica se o teste requer Modbus e se a porta Modbus está conectada
         modbus_required_by_steps = any(step.get("tipo_passo") == "modbus_comando" for step in self.current_test_steps)
-        if modbus_required_by_steps and not modbus_connected:
+        if not uses_runtime_profiles and modbus_required_by_steps and not modbus_connected:
             self.modbus_serial_group.setVisible(True)
             self.modbus_details_widget.setVisible(True)
             self.modbus_config_toggle_button.setArrowType(Qt.ArrowType.DownArrow)
@@ -4626,9 +6146,12 @@ class PlacaTesterApp(QMainWindow):
         for i, step in enumerate(self.current_test_steps):
             step['status'] = "Pendente"
             step['last_error_detail'] = ""
+            step['auto_retry_attempts'] = 0
 
         self.test_start_time = datetime.now()
-        self.oled.iniciar_teste()
+        oled = self._ensure_oled_display()
+        if oled is not None:
+            oled.iniciar_teste(self.current_serial_number)
         self._start_test_execution() # Inicia a execução do primeiro passo
 
     def _start_test_execution(self):
@@ -4638,6 +6161,15 @@ class PlacaTesterApp(QMainWindow):
         from datetime import datetime
         from socket import gethostname
         import platform
+
+        self._close_datalogger_tab(save_current=True)
+
+        if self._required_test_profile_keys():
+            ok, error_msg = self._open_required_test_runtime_ports()
+            if not ok:
+                QMessageBox.warning(self, "Portas do Teste", error_msg)
+                self.log_message(error_msg, "erro")
+                return
 
         self.test_log_entries = []  # Limpa o log do teste atual
         self.test_start_time = datetime.now()  # Registra o tempo de início
@@ -4733,9 +6265,34 @@ class PlacaTesterApp(QMainWindow):
                         self.test_log_entries.append(f"[{datetime.now().strftime('%H:%M:%S')}] PASSO {i+1}: {step['nome']} - Status: INTERROMPIDO (Interrompido pelo Usuário)")
                         step['status'] = "INTERROMPIDO"
 
-            self.oled.cancelar_teste()
+            oled = self._ensure_oled_display()
+            if oled is not None:
+                oled.cancelar_teste()
             self._finish_test() # Finaliza o teste (gera log, etc.)
     
+    def _should_hide_terminal_message(self, text):
+        lower_text = (text or "").strip().lower()
+        hidden_prompts = (
+            "press any key to continue",
+            "pressione qualquer tecla",
+        )
+        return any(prompt in lower_text for prompt in hidden_prompts)
+
+    def _show_guarded_question(self, title, text, buttons):
+        msg_box = EnterReleaseProtectedMessageBox(self)
+        app_icon = load_app_icon()
+        if not app_icon.isNull():
+            msg_box.setWindowIcon(app_icon)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(text)
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setStandardButtons(buttons)
+        msg_box.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        yes_button = msg_box.button(QMessageBox.StandardButton.Yes)
+        if yes_button is not None:
+            msg_box.set_enter_guard_activation_button(yes_button)
+        return QMessageBox.StandardButton(msg_box.exec())
+
     def _execute_next_test_step(self):
         """
         Executa o próximo passo na sequência do teste.
@@ -4745,8 +6302,19 @@ class PlacaTesterApp(QMainWindow):
         # Verifica se as portas necessárias ainda estão abertas
         serial_command_connected = (self.serial_command_ser is not None and self.serial_command_ser.is_open)
         modbus_connected = (self.modbus_ser is not None and self.modbus_ser.is_open)
+        uses_runtime_profiles = bool(self._required_test_profile_keys())
 
-        if not serial_command_connected:
+        if uses_runtime_profiles:
+            for profile_key in self._required_test_profile_keys():
+                ser_instance = self.test_runtime_ports.get(profile_key)
+                profile = self._get_test_port_profile(profile_key)
+                if ser_instance is None or not ser_instance.is_open:
+                    profile_name = profile.get("display_name", profile_key) if profile else profile_key
+                    self.log_message(f"AVISO: Porta lógica '{profile_name}' não está aberta. Finalizando teste.", "erro")
+                    self.test_log_entries.append(f"  ERRO: Porta lógica '{profile_name}' não está aberta. Teste finalizado inesperadamente.")
+                    self._finish_test()
+                    return
+        elif not serial_command_connected:
             self.log_message("AVISO: Porta 'Principal' não está aberta. Finalizando teste.", "erro")
             self.test_log_entries.append(f"  ERRO: Porta 'Principal' não está aberta. Teste finalizado inesperadamente.")
             self._finish_test()
@@ -4794,6 +6362,17 @@ class PlacaTesterApp(QMainWindow):
         step['status'] = "Em Execução" # Marca o passo como em execução
 
         if step_type == "comando_validacao":
+            step.setdefault("auto_retry_attempts", 0)
+            current_attempt = int(step.get("auto_retry_attempts", 0)) + 1
+            total_attempts = self.AUTO_STEP_MAX_RETRIES + 1
+            if current_attempt > 1:
+                self.log_message(
+                    f"Retentativa automática do passo '{step['nome']}' ({current_attempt}/{total_attempts}).",
+                    "informacao"
+                )
+                self.test_log_entries.append(
+                    f"  Executando Retentativa Automática {current_attempt}/{total_attempts}"
+                )
             command_to_send = step.get("comando_enviar", "")
             port_type = step.get("port_type", "serial")
             # Aplica recurso de NS (se habilitado para o passo)
@@ -4809,25 +6388,19 @@ class PlacaTesterApp(QMainWindow):
             if hasattr(self, "_build_command_with_rtc"):
                 command_to_send = self._build_command_with_rtc(command_to_send, use_rtc, rtc_mode, rtc_pattern)
             
-            # Seleciona porta e thread de leitura conforme 'port_type'
-            target_ser = self.serial_command_ser
-            target_reader = self.serial_command_reader_thread
-            target_port_name = "Principal"
-            if port_type == "modbus":
-                target_ser = self.modbus_ser
-                target_reader = self.modbus_serial_reader_thread
-                target_port_name = "Modbus"
+            target_ser, target_reader, target_port_name, resolved_role = self._resolve_step_target_port(step)
+            self._set_reader_mode(target_reader, "modbus" if resolved_role == "modbus" else "serial")
 
             # Verifica se a porta selecionada está conectada para este passo
             if target_ser is None or not target_ser.is_open:
                 error_msg = f"Porta '{target_port_name}' não está conectada para o passo '{step['nome']}'."
                 self.log_message(f"ERRO: {error_msg} Teste falhou neste passo.", "erro")
                 self.test_log_entries.append(f"  ERRO: {error_msg}")
-                self.failed_steps_count += 1
-                self._update_list_item_status(step, "REPROVADO", QColor("#FF4500"), error_msg)
-                self.current_test_index += 1
-                QTimer.singleShot(100, self._execute_next_test_step)
+                self._handle_automatic_step_failure(step, error_msg)
                 return
+
+            if step.get("esperar_resposta", False) and target_reader:
+                target_reader.clear_response_buffer_for_next_step()
 
             try:
                 # Substitui sequências de escape e codifica o comando
@@ -4836,28 +6409,20 @@ class PlacaTesterApp(QMainWindow):
                 self.log_message(f"Comando Enviado: '{command_to_send.strip()}'", "enviado")
                 self.test_log_entries.append(f"  Comando Enviado ({target_port_name}): '{command_to_send.strip()}'")
             except serial.SerialException as e:
-                error_msg = f"Erro de comunicação serial (Principal): {e}"
+                error_msg = f"Erro de comunicação serial ({target_port_name}): {e}"
                 self.log_message(f"ERRO: Falha ao enviar comando para '{step['nome']}': {e}. Teste falhou neste passo.", "erro")
                 self.test_log_entries.append(f"  ERRO: Falha ao enviar comando: {e}")
-                self.failed_steps_count += 1
-                self._update_list_item_status(step, "REPROVADO", QColor("#FF4500"), error_msg)
-                self.current_test_index += 1
-                QTimer.singleShot(100, self._execute_next_test_step)
+                self._handle_automatic_step_failure(step, error_msg)
                 return
             except Exception as e:
                 error_msg = f"Erro inesperado: {e}"
                 self.log_message(f"ERRO INESPERADO: Falha ao enviar comando para '{step['nome']}': {e}. Teste falhou neste passo.", "erro")
                 self.test_log_entries.append(f"  ERRO INESPERADO: Falha ao enviar comando: {e}")
-                self.failed_steps_count += 1
-                self._update_list_item_status(step, "REPROVADO", QColor("#FF4500"), error_msg)
-                self.current_test_index += 1
-                QTimer.singleShot(100, self._execute_next_test_step)
+                self._handle_automatic_step_failure(step, error_msg)
                 return
 
             if step.get("esperar_resposta", False):
                 timeout_ms = int(step.get("timeout_ms", 1000))
-                if target_reader:
-                    target_reader.clear_response_buffer_for_next_step() # Limpa o buffer antes de esperar nova resposta
                 # Usa QTimer.singleShot estático para não conflitar com outros usos de self.test_timer
                 QTimer.singleShot(max(1, timeout_ms), lambda: self._process_test_response(step, target_reader))
             else:
@@ -4866,6 +6431,7 @@ class PlacaTesterApp(QMainWindow):
                 step_index = self.current_test_steps.index(step) + 1
                 self.test_log_entries.append(f"  Status: PASSO {step_index}: APROVADO")
                 self.passed_steps_count += 1
+                step["auto_retry_attempts"] = 0
                 self._update_list_item_status(step, "APROVADO", QColor("#32CD32"))
                 self.current_test_index += 1
                 QTimer.singleShot(100, self._execute_next_test_step) # Avança para o próximo passo
@@ -4925,8 +6491,9 @@ class PlacaTesterApp(QMainWindow):
         elif step_type == "modbus_comando": # NOVO: Execução do passo de comando Modbus (assíncrono)
             modbus_params_list = step.get("modbus_params", [])
 
-            if not modbus_connected:
-                error_msg = f"Porta 'Modbus' não está conectada para o passo '{step['nome']}'."
+            modbus_target_ser, modbus_target_reader, modbus_target_name, _ = self._resolve_step_target_port(step, require_modbus=True)
+            if modbus_target_ser is None or not modbus_target_ser.is_open:
+                error_msg = f"Porta '{modbus_target_name}' não está conectada para o passo '{step['nome']}'."
                 self.log_message(f"ERRO: {error_msg} Teste falhou neste passo.", "erro")
                 self.test_log_entries.append(f"  ERRO: {error_msg}")
                 self.failed_steps_count += 1
@@ -4965,6 +6532,9 @@ class PlacaTesterApp(QMainWindow):
                     self.failed_steps_count += 1
                     self._update_list_item_status(step, "REPROVADO", QColor("#FF4500"), overall_error_msg)
 
+                if self._is_shared_port_open():
+                    self._set_reader_mode(self.serial_command_reader_thread, "serial")
+
                 self.current_test_index += 1
                 QTimer.singleShot(100, self._execute_next_test_step)
 
@@ -4990,6 +6560,7 @@ class PlacaTesterApp(QMainWindow):
 
                 self.log_message(f"  Executando Modbus (Linha {i+1}): {function_code_display} End: {address}, Qtd: {quantity}", "informacao")
                 self.test_log_entries.append(f"    Modbus (Linha {i+1}): {function_code_display} End: {address}, Qtd: {quantity}")
+                self._set_reader_mode(modbus_target_reader, "modbus")
 
                 try:
                     determined_value_format = None
@@ -5021,7 +6592,7 @@ class PlacaTesterApp(QMainWindow):
                             value_type=value_type
                         )
 
-                    self.modbus_ser.write(request_bytes)
+                    modbus_target_ser.write(request_bytes)
                     self.log_message(f"    Comando Modbus Enviado: {request_bytes.hex().upper()}", "enviado")
                     self.test_log_entries.append(f"      Comando Enviado: {request_bytes.hex().upper()}")
 
@@ -5035,7 +6606,7 @@ class PlacaTesterApp(QMainWindow):
                 def on_response_timeout():
                     nonlocal all_passed, overall_error_msg
                     try:
-                        response_data = self.modbus_serial_reader_thread.get_buffered_response()
+                        response_data = modbus_target_reader.get_buffered_response() if modbus_target_reader else b""
                         if response_data:
                             self.log_message(f"    Resposta Modbus Recebida:\n'{response_data.hex().upper()}'", "recebido")
                             self.test_log_entries.append(f"      Resposta Recebida: '{response_data.hex().upper()}'")
@@ -5110,7 +6681,7 @@ class PlacaTesterApp(QMainWindow):
 
                 # Tempo de espera para resposta: usa timeout da porta ou 5000ms como padrão
                 try:
-                    delay_ms = int(getattr(self.modbus_ser, 'timeout', 5) * 1000) if self.modbus_ser else 5000
+                    delay_ms = int(getattr(modbus_target_ser, 'timeout', 5) * 1000) if modbus_target_ser else 5000
                     delay_ms = max(50, min(delay_ms, 10000))
                 except Exception:
                     delay_ms = 5000
@@ -5128,6 +6699,7 @@ class PlacaTesterApp(QMainWindow):
                 if not serial_number:
                     raise ValueError("last_serial_number vazio no settings.json")
                 command_to_send = f"SET_NS={serial_number};"
+                self._set_reader_mode(self.serial_command_reader_thread, "serial")
                 # Envia pela porta principal, sem adicionar nova linha
                 self.serial_command_ser.write(command_to_send.encode())
                 self.log_message(f"Comando Enviado: '{command_to_send}'", "enviado")
@@ -5157,7 +6729,11 @@ class PlacaTesterApp(QMainWindow):
             self.test_log_entries.append(f"  Pergunta: '{question}'")
             self.test_log_entries.append(f"  CMD: '{cmd_path}'")
 
-            reply = QMessageBox.question(self, "Gravar Placa", question, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            reply = self._show_guarded_question(
+                "Gravar Placa",
+                question,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
             if reply == QMessageBox.StandardButton.Yes:
                 self.log_message(f"APROVADO: '{step['nome']}' (Operador informou que já está gravada)", "test_pass")
                 step_index = self.current_test_steps.index(step) + 1
@@ -5166,7 +6742,7 @@ class PlacaTesterApp(QMainWindow):
                 self._update_list_item_status(step, "APROVADO", QColor("#32CD32"))
             else:
                 # Constrói popup com instruções e dois botões
-                dlg = QDialog(self)
+                dlg = EnterReleaseProtectedDialog(self)
                 dlg.setWindowTitle("Gravar Placa")
                 dlg.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
                 v = QVBoxLayout(dlg)
@@ -5205,9 +6781,11 @@ class PlacaTesterApp(QMainWindow):
                 btns = QDialogButtonBox()
                 btn_gravar = QPushButton("Gravar")
                 btn_cancel = QPushButton("Cancelar")
+                dlg.set_enter_guard_activation_button(btn_gravar)
                 btns.addButton(btn_gravar, QDialogButtonBox.ButtonRole.AcceptRole)
                 btns.addButton(btn_cancel, QDialogButtonBox.ButtonRole.RejectRole)
                 v.addWidget(btns)
+                v.addWidget(dlg.create_enter_guard_label())
 
                 def on_gravar():
                     try:
@@ -5346,10 +6924,11 @@ class PlacaTesterApp(QMainWindow):
                                         lower = line.lower()
                                         if any(pat in lower for pat in success_patterns):
                                             success_flag = True
-                                        try:
-                                            self.log_message(f"[{tag}] {line}", "informacao")
-                                        except Exception:
-                                            pass
+                                        if not self._should_hide_terminal_message(line):
+                                            try:
+                                                self.log_message(f"[{tag}] {line}", "informacao")
+                                            except Exception:
+                                                pass
                                         # Error/open port KO handling
                                         if ("opening port [ko]" in lower or "cannot open the com port" in lower) and not stop_requested:
                                             stop_requested = True
@@ -5449,7 +7028,7 @@ class PlacaTesterApp(QMainWindow):
                                     except Exception:
                                         pass
                                 # Flush remaining buffer as one line
-                                if buf.strip():
+                                if buf.strip() and not self._should_hide_terminal_message(buf.strip()):
                                     try:
                                         self.log_message(f"[{tag}] {buf.strip()}", "informacao")
                                     except Exception:
@@ -5593,12 +7172,73 @@ class PlacaTesterApp(QMainWindow):
         self.current_test_index += 1
         QTimer.singleShot(100, self._execute_next_test_step) # Avança para o próximo passo
 
+    def _handle_automatic_step_failure(self, step_config, error_msg, response_data=None):
+        """
+        Trata falhas de passos automáticos com até 2 novas tentativas antes
+        de marcar reprovação definitiva e seguir o teste.
+        """
+        attempts = int(step_config.get("auto_retry_attempts", 0) or 0)
+        max_retries = int(getattr(self, "AUTO_STEP_MAX_RETRIES", 2))
+        total_attempts = max_retries + 1
+
+        if attempts < max_retries:
+            next_attempt = attempts + 1
+            step_config["auto_retry_attempts"] = next_attempt
+            step_config["status"] = "Pendente"
+            step_config["last_error_detail"] = error_msg or ""
+
+            attempt_msg = (
+                f"Falha no passo automático '{step_config.get('nome', 'Passo sem nome')}'. "
+                f"Tentando novamente ({next_attempt + 1}/{total_attempts})."
+            )
+            self.log_message(attempt_msg, "informacao")
+            self.test_log_entries.append(f"  RETENTATIVA AUTOMÁTICA: {next_attempt}/{max_retries}")
+            if error_msg:
+                self.test_log_entries.append(f"  Motivo da Retentativa: {error_msg}")
+            if response_data not in (None, "", b""):
+                self.test_log_entries.append(f"  Última Resposta Antes da Retentativa: '{response_data}'")
+
+            if 'list_item' in step_config and step_config['list_item'] is not None:
+                item = step_config['list_item']
+                item_index = self.current_test_steps.index(step_config)
+                item.setText(
+                    f"Passo {item_index + 1}: {step_config.get('nome', 'Sem Nome')} - "
+                    f"Nova Tentativa {next_attempt + 1}/{total_attempts}"
+                )
+                item.setForeground(QBrush(QColor("#FFA500")))
+                self.test_progress_list.scrollToItem(item)
+
+            QTimer.singleShot(150, self._execute_next_test_step)
+            return
+
+        step_index = self.current_test_steps.index(step_config) + 1
+        self.log_message(
+            f"REPROVADO: '{step_config.get('nome', 'Passo sem nome')}' após {total_attempts} tentativas.",
+            "test_fail"
+        )
+        self.test_log_entries.append(f"  Status: PASSO {step_index}: REPROVADO")
+        self.test_log_entries.append(f"  Tentativas Totais: {total_attempts}")
+        if error_msg:
+            self.test_log_entries.append(f"  Detalhe do Erro: {error_msg}")
+
+        self.failed_steps_count += 1
+        step_config["auto_retry_attempts"] = 0
+        self._update_list_item_status(step_config, "REPROVADO", QColor("#FF4500"), error_msg)
+        self.current_test_index += 1
+        QTimer.singleShot(100, self._execute_next_test_step)
+
     def _process_test_response(self, step_config, reader_thread):
         """
         Processa a resposta recebida da porta serial para um passo de teste.
         Realiza a validação da resposta e atualiza o status do passo.
         """
         if not self.test_in_progress:
+            return
+
+        if reader_thread is None:
+            error_msg = "Thread de leitura não disponível para validar a resposta."
+            self.log_message(f"ERRO: {error_msg}", "erro")
+            self._handle_automatic_step_failure(step_config, error_msg)
             return
 
         # Verifica se a porta ainda está aberta
@@ -5639,15 +7279,16 @@ class PlacaTesterApp(QMainWindow):
             step_index = self.current_test_steps.index(step_config) + 1
             self.test_log_entries.append(f"  Status: PASSO {step_index}: APROVADO")
             self.passed_steps_count += 1
+            step_config["auto_retry_attempts"] = 0
             self._update_list_item_status(step_config, "APROVADO", QColor("#32CD32"))
         else:
-            self.log_message(f"REPROVADO: '{step_config.get('nome', 'Passo sem nome')}': Resposta não validada. Resposta Recebida:\n'{response_data}'", "test_fail")
-            step_index = self.current_test_steps.index(step_config) + 1
-            self.test_log_entries.append(f"  Status: PASSO {step_index}: REPROVADO")
-            if error_msg:
-                self.test_log_entries.append(f"  Detalhe do Erro: {error_msg}")
-            self.failed_steps_count += 1
-            self._update_list_item_status(step_config, "REPROVADO", QColor("#FF4500"), error_msg)            
+            self.log_message(
+                f"Falha na validação de '{step_config.get('nome', 'Passo sem nome')}'. "
+                f"Resposta Recebida:\n'{response_data}'",
+                "informacao"
+            )
+            self._handle_automatic_step_failure(step_config, error_msg, response_data=response_data)
+            return
         self.current_test_index += 1
         QTimer.singleShot(100, self._execute_next_test_step) # Avança para o próximo passo
 
@@ -5720,6 +7361,7 @@ class PlacaTesterApp(QMainWindow):
         
         step_to_retest['status'] = "Pendente" # Reseta o status do passo
         step_to_retest['last_error_detail'] = ""
+        step_to_retest['auto_retry_attempts'] = 0
 
         self.current_test_index = failed_step_index # Define o índice para o passo a ser re-testado
         
@@ -5936,8 +7578,15 @@ class PlacaTesterApp(QMainWindow):
 
         tempo_total = int((datetime.now() - self.test_start_time).total_seconds())
         houve_erro = any(s.get("status") == "REPROVADO" for s in self.current_test_steps)
-        self.oled.finalizar_teste(duracao_segundos=tempo_total, houve_erro=houve_erro)
+        oled = self._ensure_oled_display()
+        if oled is not None:
+            oled.finalizar_teste(
+                duracao_segundos=tempo_total,
+                houve_erro=houve_erro,
+                numero_serie=self.current_serial_number
+            )
 
+        self._close_test_runtime_ports()
         self._generate_test_log_file() # Gera o arquivo de log do teste
         self._reset_test_controls() # Redefine os controles da UI
 
@@ -6083,7 +7732,8 @@ class PlacaTesterApp(QMainWindow):
             "modbus_rts": False, # Adicionado RTS padrão
             "auto_send_lines": [{"command": "", "auto_send_checked": False, "interval_seconds": 1.0}] * 4,
             "last_pr_number": "",
-            "last_serial_number": ""
+            "last_serial_number": "",
+            "datalogger_settings": build_default_datalogger_settings(),
         }
         try:
             with open(self.settings_file, "w", encoding="utf-8") as f:
@@ -6116,7 +7766,8 @@ class PlacaTesterApp(QMainWindow):
             "modbus_rts": self.modbus_rts_checkbox.isChecked(), # Salva estado do RTS Modbus
             "auto_send_lines": [],
             "last_pr_number": self.current_pr_number,
-            "last_serial_number": self.current_serial_number
+            "last_serial_number": self.current_serial_number,
+            "datalogger_settings": self.datalogger_settings,
         }
         for i in range(len(self.send_command_inputs)):
             line_config = {
@@ -6185,6 +7836,8 @@ class PlacaTesterApp(QMainWindow):
 
             self.current_pr_number = settings.get("last_pr_number", "")
             self.current_serial_number = settings.get("last_serial_number", "")
+            self.datalogger_settings = settings.get("datalogger_settings", build_default_datalogger_settings())
+            self._sync_datalogger_runtime()
             # Carrega configuracoes das linhas de auto-envio
             loaded_lines = settings.get("auto_send_lines", [])
             if len(loaded_lines) > len(self.send_command_inputs):
@@ -6201,7 +7854,9 @@ class PlacaTesterApp(QMainWindow):
                     interval = 1.0
                 self.auto_send_intervals_s[i] = interval
 
-                self.auto_send_checkboxes[i].setChecked(line_config.get("auto_send_checked", False))
+                self.auto_send_checkboxes[i].blockSignals(True)
+                self.auto_send_checkboxes[i].setChecked(False)
+                self.auto_send_checkboxes[i].blockSignals(False)
 
         except (json.JSONDecodeError, Exception) as e:
             self.log_message(f"Erro ao carregar configurações do arquivo: {e}. Revertendo para configurações padrão.", "erro")
@@ -6324,11 +7979,17 @@ class PlacaTesterApp(QMainWindow):
 if __name__ == "__main__":
     # Ponto de entrada da aplicação
     try:
+        # Forca o AppUserModelID no Windows para fixar o icone correto na barra de tarefas
+        if platform.system() == "Windows":
+            try:
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("EmbTech.Serial")
+            except Exception:
+                pass
         app = QApplication(sys.argv)
         # Caminho absoluto para o ícone
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-        icon_path = os.path.join(base_path, "assets", "icone.ico")
-        app.setWindowIcon(QIcon(icon_path))
+        app_icon = load_app_icon()
+        if not app_icon.isNull():
+            app.setWindowIcon(app_icon)
         window = PlacaTesterApp()
         window.show() # Exibe a janela principal
         sys.exit(app.exec()) # Inicia o loop de eventos da aplicação
