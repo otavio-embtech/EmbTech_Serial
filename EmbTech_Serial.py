@@ -1114,6 +1114,8 @@ class PlacaTesterApp(QMainWindow):
         self.current_pr_number = "" # Número do PR (Product Request) do teste atual
         self.current_serial_number = "" # Número de série da placa em teste
         self.test_log_entries = [] # Entradas de log para o teste atual
+        self.current_test_log_file_path = "" # Caminho do log consolidado da sessão atual
+        self.current_test_retest_count = 0 # Quantidade de re-testes na sessão atual
         self.modbus_required_for_test = False # Indica se o teste atual requer a porta Modbus
 
         self.test_serial_command_settings = {} # Configurações da porta principal para o teste
@@ -6148,6 +6150,8 @@ class PlacaTesterApp(QMainWindow):
             step['last_error_detail'] = ""
             step['auto_retry_attempts'] = 0
 
+        self.current_test_log_file_path = ""
+        self.current_test_retest_count = 0
         self.test_start_time = datetime.now()
         oled = self._ensure_oled_display()
         if oled is not None:
@@ -6192,6 +6196,8 @@ class PlacaTesterApp(QMainWindow):
         self.test_log_entries.append(f"Operador do Teste: {usuario}")
         self.test_log_entries.append(f"Máquina de Teste: {machine_name}")
         self.test_log_entries.append("")  # Linha em branco
+        self.test_log_entries.append("--- EXECUÇÃO INICIAL ---")
+        self.test_log_entries.append("")
 
         # Mensagem de início no painel
         self.log_message("INICIANDO EXECUÇÃO DO TESTE AUTOMÁTICO", "sistema")
@@ -7352,6 +7358,10 @@ class PlacaTesterApp(QMainWindow):
         self.log_message(f"Re-testando passo {failed_step_index + 1}: '{self.current_test_steps[failed_step_index]['nome']}'", "sistema")
         
         step_to_retest = self.current_test_steps[failed_step_index]
+        self.current_test_retest_count += 1
+        original_status = step_to_retest.get('status')
+        original_error_detail = step_to_retest.get('last_error_detail', "")
+        original_auto_retry_attempts = step_to_retest.get('auto_retry_attempts', 0)
 
         # Ajusta contadores de passos
         if step_to_retest.get('status') == 'APROVADO':
@@ -7364,6 +7374,23 @@ class PlacaTesterApp(QMainWindow):
         step_to_retest['auto_retry_attempts'] = 0
 
         self.current_test_index = failed_step_index # Define o índice para o passo a ser re-testado
+
+        if self._required_test_profile_keys():
+            ok, error_msg = self._open_required_test_runtime_ports()
+            if not ok:
+                if original_status == 'APROVADO':
+                    self.passed_steps_count += 1
+                elif original_status == 'REPROVADO':
+                    self.failed_steps_count += 1
+
+                step_to_retest['status'] = original_status
+                step_to_retest['last_error_detail'] = original_error_detail
+                step_to_retest['auto_retry_attempts'] = original_auto_retry_attempts
+                self.current_test_index = -1
+
+                self.log_message(error_msg, "erro")
+                QMessageBox.warning(self, "Portas do Teste", error_msg)
+                return
         
         self.test_in_progress = True
         self.start_test_button.setEnabled(False)
@@ -7381,10 +7408,31 @@ class PlacaTesterApp(QMainWindow):
             self.auto_send_config_buttons[i].setEnabled(False)
             self.auto_send_timers[i].stop()
 
+        readers_to_clear = []
         if self.serial_command_reader_thread:
-            self.serial_command_reader_thread.clear_response_buffer_for_next_step()
+            readers_to_clear.append(self.serial_command_reader_thread)
         if self.modbus_serial_reader_thread:
-            self.modbus_serial_reader_thread.clear_response_buffer_for_next_step()
+            readers_to_clear.append(self.modbus_serial_reader_thread)
+        readers_to_clear.extend(self.test_runtime_readers.values())
+
+        cleared_reader_ids = set()
+        for reader in readers_to_clear:
+            if reader is None:
+                continue
+            reader_id = id(reader)
+            if reader_id in cleared_reader_ids:
+                continue
+            cleared_reader_ids.add(reader_id)
+            try:
+                reader.clear_response_buffer_for_next_step()
+            except Exception:
+                pass
+
+        self.test_log_entries.append("")
+        self.test_log_entries.append(
+            f"--- RE-TESTE {self.current_test_retest_count}: PASSO {failed_step_index + 1} - {step_to_retest.get('nome', 'Sem Nome')} ---"
+        )
+        self.test_log_entries.append("")
 
         self.test_progress_label.setText(f"Status Geral: Re-testando passo {failed_step_index + 1}...")
         
@@ -7611,9 +7659,23 @@ class PlacaTesterApp(QMainWindow):
         fallback_pr_dir = os.path.join(fallback_base, pr_folder_name)
 
         clean_serial_number = self.current_serial_number.replace('/', '-')
+        log_content = "\n".join(self.test_log_entries)
+
+        existing_log_path = (self.current_test_log_file_path or "").strip()
+        if existing_log_path:
+            try:
+                os.makedirs(os.path.dirname(existing_log_path), exist_ok=True)
+                with open(existing_log_path, 'w', encoding='utf-8') as f:
+                    f.write(log_content)
+                self.log_message(f"Log do teste atualizado em: '{existing_log_path}'", "sistema")
+                self._move_pending_logs_to_selected_folder()
+                return
+            except Exception as e:
+                self.log_message(f"Erro ao atualizar o log consolidado da sessão: {e}", "erro")
+                self.current_test_log_file_path = ""
+
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         file_name = f"PR{self.current_pr_number}_{clean_serial_number}_{timestamp}.txt"
-        log_content = "\n".join(self.test_log_entries)
 
         # Tenta salvar na pasta selecionada
         try:
@@ -7621,6 +7683,7 @@ class PlacaTesterApp(QMainWindow):
             full_file_path = os.path.join(pr_log_dir, file_name)
             with open(full_file_path, 'w', encoding='utf-8') as f:
                 f.write(log_content)
+            self.current_test_log_file_path = full_file_path
             self.log_message(f"Log do teste salvo como: '{full_file_path}'", "sistema")
             # Após salvar, tenta mover logs pendentes do fallback
             self._move_pending_logs_to_selected_folder()
@@ -7632,6 +7695,7 @@ class PlacaTesterApp(QMainWindow):
                 fallback_file_path = os.path.join(fallback_pr_dir, file_name)
                 with open(fallback_file_path, 'w', encoding='utf-8') as f:
                     f.write(log_content)
+                self.current_test_log_file_path = fallback_file_path
                 self.log_message(f"Log do teste salvo em fallback: '{fallback_file_path}'", "sistema")
             except Exception as e2:
                 self.log_message(f"Erro ao salvar o log no fallback: {e2}", "erro")
