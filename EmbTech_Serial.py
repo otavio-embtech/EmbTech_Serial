@@ -1054,7 +1054,7 @@ class PlacaTesterApp(QMainWindow):
     Aplicação principal para teste de placas via comunicação serial e Modbus.
     Oferece terminal, envio automático/manual de comandos e um criador de testes.
     """
-    VERSION = "3.9.6" # Versão atual do aplicativo (incrementada para tema)
+    VERSION = "3.9.8" # Versão atual do aplicativo (incrementada para tema)
     AUTO_STEP_MAX_RETRIES = 2
 
     CONFIG_FILE_TEST_OPERATOR = 'test_operator_config.ini' # Use um nome de arquivo diferente para esta configuração
